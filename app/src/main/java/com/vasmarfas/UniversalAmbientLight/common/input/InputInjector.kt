@@ -92,6 +92,9 @@ class InputInjector(private val mContext: Context) {
                 }
             } catch (_: IOException) {
                 // Поток закрыли при остановке - это и есть конец вывода.
+            } catch (_: IllegalStateException) {
+                // То же самое через dadb (Android 10 и ниже): закрытый поток okio сообщает не
+                // IOException, а IllegalStateException «closed»
             }
             synchronized(mLock) { if (mShell === shell) closeLocked() }
         }, "input-helper-output").apply { isDaemon = true }.start()
@@ -108,6 +111,9 @@ class InputInjector(private val mContext: Context) {
             result[0] = try {
                 reader.readLine()
             } catch (e: IOException) {
+                e.message
+            } catch (e: IllegalStateException) {
+                // dadb, если поток закрыли по таймауту старта, см. поток вывода в start()
                 e.message
             }
         }, "input-helper-start")
