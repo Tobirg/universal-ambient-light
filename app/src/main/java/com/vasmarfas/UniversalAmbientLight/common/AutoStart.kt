@@ -29,6 +29,12 @@ object AutoStart {
 
     private const val WATCHDOG_INTERVAL_MS = 3 * 60 * 1000L
 
+    // Philips (TPV) на Android 11 в дежурном режиме не усыпляет процессор, и будильник без
+    // пробуждения приходит каждые три минуты. Система там отвечает так медленно, что даже
+    // короткий onReceive не укладывается в таймаут: ANR, гибель процесса и новый подъём
+    // будильником по кругу. Пока экран погашен, проверяем раз в полчаса
+    private const val STANDBY_WATCHDOG_INTERVAL_MS = 30 * 60 * 1000L
+
     fun shouldResume(context: Context): Boolean {
         val prefs = Preferences(context)
         return prefs.getBoolean(R.string.pref_key_boot) &&
@@ -49,11 +55,11 @@ object AutoStart {
             cancelWatchdog(context)
             return
         }
-        scheduleWatchdog(context)
-        if (ScreenGrabberService.sInstanceRunning) return
         // Экран погашен — ТВ в дежурном режиме, будить ленту незачем
         val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-        if (power?.isInteractive == false) return
+        val standby = power?.isInteractive == false
+        scheduleWatchdog(context, if (standby) STANDBY_WATCHDOG_INTERVAL_MS else WATCHDOG_INTERVAL_MS)
+        if (standby || ScreenGrabberService.sInstanceRunning) return
         Log.i(TAG, "Watchdog: capture service is gone, resuming")
         resume(context)
     }
@@ -71,13 +77,13 @@ object AutoStart {
      * Сторож нужен только телевизору: на телефоне подсветку из фона не вернуть без диалога
      * записи экрана, а всплывающий сам по себе диалог хуже остановившейся подсветки.
      */
-    fun scheduleWatchdog(context: Context) {
+    fun scheduleWatchdog(context: Context, intervalMs: Long = WATCHDOG_INTERVAL_MS) {
         if (!DeviceProfile.isTv(context) || !shouldResume(context)) return
         val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         try {
             alarms.set(
                 AlarmManager.ELAPSED_REALTIME,
-                SystemClock.elapsedRealtime() + WATCHDOG_INTERVAL_MS,
+                SystemClock.elapsedRealtime() + intervalMs,
                 watchdogIntent(context)
             )
         } catch (e: Exception) {

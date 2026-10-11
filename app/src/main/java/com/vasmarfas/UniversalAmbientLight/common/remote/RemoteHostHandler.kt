@@ -64,8 +64,11 @@ internal class RemoteHostHandler(
         }
     }
 
+    // Зовут из onDestroy сервиса на главном потоке, а отпуск зажатой кнопки и закрытие
+    // процесса ввода ждут замка InputInjector: его держит поток пульта, пока подключается к
+    // ADB и поднимает app_process, а это до 18 секунд
     fun close() {
-        mInput.shutdown()
+        Thread({ mInput.shutdown() }, "remote-input-shutdown").apply { isDaemon = true }.start()
     }
 
     override fun handle(client: RemoteServer.Client, op: String, request: JSONObject): JSONObject =
