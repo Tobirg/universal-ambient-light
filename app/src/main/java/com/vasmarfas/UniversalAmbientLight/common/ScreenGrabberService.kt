@@ -1318,8 +1318,8 @@ class ScreenGrabberService : Service() {
                 mHandler?.post { mStartError = errorMsg; haltStartup() }
             }
             val encoder: CaptureBackend =
-                if (Mt5889VssCaptureEncoder.isAvailable()) {
-                    Mt5889VssCaptureEncoder(applicationContext, gate, options, fatal)
+                if (MStarVssCaptureEncoder.isAvailable()) {
+                    MStarVssCaptureEncoder(applicationContext, gate, options, fatal)
                 } else {
                     MtkThalCaptureEncoder(
                         applicationContext, gate,
