@@ -190,12 +190,20 @@ class MStarVssCaptureEncoder(
                     }
                 } catch (_: IOException) { }
             }, "MStar-stderr").apply { isDaemon = true }.start()
-            if (!running || session != expectedSession) {
+            // Регистрация под тем же монитором, что и stopRecording:
+            // исключает гонку между проверкой сессии и сохранением процесса.
+            val registered = synchronized(this) {
+                if (!running || session != expectedSession) false
+                else {
+                    process = proc
+                    nativePid = pidHolder
+                    true
+                }
+            }
+            if (!registered) {
                 stopProcess(proc, pidHolder)
                 return
             }
-            process = proc
-            nativePid = pidHolder
 
             val input = DataInputStream(proc.inputStream)
             val header = ByteArray(8)
