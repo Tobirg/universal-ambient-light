@@ -174,7 +174,7 @@ __attribute__((used,noinline)) static int entry(u32*sp){
    eprint("usage: libmstar_vss_server.so X Y SRC_W SRC_H OUT_W OUT_H FPS\n");return 2;
  }
  if(srcw==0||srch==0||((unsigned long long)x+srcw)>0xffffffffull||((unsigned long long)y+srch)>0xffffffffull||
-    w==0||h==0||((unsigned long long)srcw*h)!=((unsigned long long)srch*w)||
+    w==0||h==0||((unsigned long long)srcw*h > (unsigned long long)srch*w ? (unsigned long long)srcw*h - (unsigned long long)srch*w : (unsigned long long)srch*w - (unsigned long long)srcw*h) > (unsigned long long)srcw||
     fps==0||((unsigned long long)w*h)>((0xffffffffull-256ull)/4ull)){eprint("ERROR invalid geometry or fps\n");return 2;}
  const u32 pixlen=w*h*4u,rgblen=w*h*3u;
  u8*pix=(u8*)smmap(pixlen+256u),*rgb=(u8*)smmap(rgblen);
