@@ -4,7 +4,7 @@ on:
     branches: [feature/mt5889-clean]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -35,3 +35,9 @@ jobs:
           name: ual-mt5889-clean-apk
           path: app/build/outputs/apk/full/debug/*.apk
           if-no-files-found: error
+      - name: Remove superseded integration branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/feature/mt5889-native"
