@@ -123,7 +123,7 @@
     <item>Screencap (Root)</item>
     <item>ADB (Скриншот, ~200мс)</item>
     <item>Accessibility (Android 11+)</item>
-    <item>MTK аппаратный захват (Root)</item>
+    <item>Аппаратный захват (MTK/MStar, Root)</item>
   </string-array>
   <string-array name="pref_list_capture_method_values">
     <item>media_projection</item>
