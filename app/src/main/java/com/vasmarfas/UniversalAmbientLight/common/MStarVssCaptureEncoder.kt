@@ -17,11 +17,13 @@ import java.io.File
 import java.io.IOException
 
 /**
- * Root-powered MStar VSS/DIP hardware capture.
+ * Аппаратный захват MStar через VSS/DIP с правами root.
  *
- * Native process frames are (u32 width LE, u32 height LE, RGB24 payload).
- * No driver calls on Android main thread; no ADB, MediaProjection, or on-disk frames.
- * The native process exits after three consecutive CaptureOne errors or a guard failure.
+ * Нативный процесс передаёт кадры: ширина и высота (u32, little-endian),
+ * затем пиксели RGB24. Вызовы драйвера не выполняются в главном потоке Android.
+ * ADB и MediaProjection не используются, кадры не записываются на диск.
+ * Нативный процесс завершается после трёх последовательных ошибок захвата
+ * либо при обнаружении выхода записи за границы буфера.
  */
 class MStarVssCaptureEncoder(
     private val context: Context,
@@ -52,7 +54,7 @@ class MStarVssCaptureEncoder(
     }
 
     private fun params(): List<String> {
-        // MStar's panel resolution may differ from Android's 1920x1080 UI mode.
+        // Физическое разрешение панели может отличаться от разрешения интерфейса Android (1920×1080).
         fun panelSize(property: String): Pair<Int, Int>? {
             val value = try {
                 val systemProperties = Class.forName("android.os.SystemProperties")
@@ -80,9 +82,9 @@ class MStarVssCaptureEncoder(
 
     private fun binary(): File {
         val destination = File(context.filesDir, BINARY)
-        // Always replace on each process creation so installed updates don't reuse an old native binary.
+        // Перед каждым запуском заменяем бинарник, чтобы не использовать старую версию после обновления APK.
         val zipPath = context.applicationInfo.sourceDir
-        val abi = "armeabi-v7a" // MStar TV has a 32-bit vendor userspace
+        val abi = "armeabi-v7a" // Библиотеки производителя на этой платформе 32-разрядные
         java.util.zip.ZipFile(zipPath).use { zip ->
             val entry = zip.getEntry("lib/$abi/lib$BINARY.so")
                 ?: throw IOException("MStar native executable missing in APK")
@@ -99,9 +101,9 @@ class MStarVssCaptureEncoder(
         try {
             val args = params()
             val bin = binary()
-            // Stage executable in the same location that worked for the diagnostic probe.
-            // Android app-private data may be noexec / SELinux-blocked even when read by su.
-            // Never overwrite the user's existing /data/local/tmp/mstar_probe.
+            // Запускаем бинарник из каталога, проверенного диагностической утилитой.
+            // Исполнение из закрытого каталога приложения может блокироваться noexec или SELinux.
+            // Диагностический /data/local/tmp/mstar_probe не перезаписываем.
             val command = "cp ${bin.absolutePath} /data/local/tmp/mstar_vss_server && " +
                 "chmod 700 /data/local/tmp/mstar_vss_server && " +
                 "LD_LIBRARY_PATH=/vendor/lib:/system/lib exec /data/local/tmp/mstar_vss_server ${args.joinToString(" ")}"
@@ -174,17 +176,17 @@ class MStarVssCaptureEncoder(
     }
 
     override fun resumeRecording() {
-        // Explicit user or standby resume only; error recovery remains bounded in native code.
+        // Возобновление по явной команде или после ожидания; обработка ошибок ограничена нативным кодом.
         startWorker()
     }
 
-    override fun setOrientation(orientation: Int) { /* hardware scaler is screen-aligned */ }
+    override fun setOrientation(orientation: Int) { /* Аппаратное масштабирование уже ориентировано по экрану. */ }
 
     companion object {
         private const val TAG = "MStarVssCapture"
         private const val BINARY = "mstar_vss_server"
 
-        /** Synchronous, cheap firmware check only; no root ioctl or su command on UI thread. */
+        /** Быстрая проверка прошивки без вызовов su или ioctl с правами root в UI-потоке. */
         fun isAvailable(): Boolean =
             android.os.Build.SUPPORTED_32_BIT_ABIS.contains("armeabi-v7a") &&
             File("/vendor/lib/libmtal.so").exists()
