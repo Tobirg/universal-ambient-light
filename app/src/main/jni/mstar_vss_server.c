@@ -1,10 +1,6 @@
-/* Параметрический захват MStar через MTAL VSS, Android 11, ARM32.
-   Диагностика символов использует dlopen/dlsym без обращения к драйверу.
-   Режимы диагностики могут читать состояние VSS через функции MTAL.
-   Экспериментальные команды инициализации и подключения способны изменять
-   внутреннее состояние VSS — применять их следует только осознанно.
-   Диагностические журналы используют постоянные пути в /data/local/tmp.
-   Потоковый режим передаёт кадры непосредственно через stdout.
+/* Потоковый аппаратный захват MStar через MTAL VSS для Android ARM32.
+   Нативный процесс получает кадры через MTVSS_CaptureOne и передаёт их в stdout.
+   Инициализация MTAL/VSS выполняется однократно на запуск процесса.
 */
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -20,15 +16,7 @@ static long swrite(int fd,const void*p,u32 n) {
  __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r2),"r"(r7):"memory");
  return r0;
 }
-static long sopenat(const char*p,int flags,int mode) {
- register long r0 __asm__("r0")=-100;
- register const char*r1 __asm__("r1")=p;
- register long r2 __asm__("r2")=flags;
- register long r3 __asm__("r3")=mode;
- register long r7 __asm__("r7")=322;
- __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r2),"r"(r3),"r"(r7):"memory");
- return r0;
-}
+
 /* mmap2 на ARM32: анонимная доступная для записи память данного процесса. */
 static void *smmap(u32 size) {
  register long r0 __asm__("r0")=0;
@@ -41,27 +29,17 @@ static void *smmap(u32 size) {
  __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r2),"r"(r3),"r"(r4),"r"(r5),"r"(r7):"memory");
  return (void*)r0;
 }
-static long sunlink(const char*path){register const char*r0 __asm__("r0")=path;register long r7 __asm__("r7")=10;
- __asm__ volatile("svc #0":"+r"(r0):"r"(r7):"memory");return (long)r0;}
-static long sclose(long fd){register long r0 __asm__("r0")=fd;
- register long r7 __asm__("r7")=6;
- __asm__ volatile("svc #0":"+r"(r0):"r"(r7):"memory");return r0;}
+
+
 /* Прямые системные вызовы ARM EABI без зависимости от оболочки ADB/su. */
-static long sfork(void){register long r0 __asm__("r0");register long r7 __asm__("r7")=2;
- __asm__ volatile("svc #0":"=r"(r0):"r"(r7):"memory");return r0;}
-static long ssetsid(void){register long r0 __asm__("r0");register long r7 __asm__("r7")=66;
- __asm__ volatile("svc #0":"=r"(r0):"r"(r7):"memory");return r0;}
-static long sdup2(long old,long target){register long r0 __asm__("r0")=old;register long r1 __asm__("r1")=target;register long r7 __asm__("r7")=63;
- __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r7):"memory");return r0;}
-__attribute__((noreturn)) static void sexit(int code){register long r0 __asm__("r0")=code;register long r7 __asm__("r7")=1;
- __asm__ volatile("svc #0"::"r"(r0),"r"(r7):"memory");for(;;){} }
+
+
+
+
 static long outfd=1;
 static u32 slen(const char*s){u32 i=0;while(s&&s[i])i++;return i;}
 static void out(const char*s){if(s)swrite((int)outfd,s,slen(s));}
-static int eq(const char*a,const char*b){while(*a&&*b){if(*a++!=*b++)return 0;}return *a==*b;}
-static void hexn(u32 x,int n){const char*t="0123456789abcdef";char b[9];
- for(int i=0;i<n;i++)b[i]=t[(x>>((n-i-1)*4))&15];b[n]=0;out(b);}
-static void hex(u32 x){out("0x");hexn(x,8);}
+
 static void num(int x){unsigned int n=(unsigned int)x;if(x<0){out("-");n=0-n;}
  char b[12];int i=0;do{b[i++]='0'+n%10;n/=10;}while(n&&i<11);
  while(i--)swrite((int)outfd,b+i,1);}
@@ -77,12 +55,7 @@ static int monotime(mono_ts*t){
 static long elapsed_ms(const mono_ts*a,const mono_ts*b){
  return (b->tv_sec-a->tv_sec)*1000L+(b->tv_nsec-a->tv_nsec)/1000000L;
 }
-static void timing(const char*name,const mono_ts*a,const mono_ts*b){
- out(name);out(" elapsed_ms=");num((int)elapsed_ms(a,b));out("\n");
-}
-static void sym(const char*n,void*p){out(n);out(" = ");if(p)hex((u32)p);else out("MISSING");out("\n");}
-static void bytes(const u8*p,u32 n){for(u32 i=0;i<n;i++){
- if(i && (i%8==0))out("\n  ");else if(i)out(" ");hexn(p[i],2);}out("\n");}
+
 static void zero(u8*p,u32 n){while(n--)*p++=0;}
 static void put32(u8*p,u32 v){for(int i=0;i<4;i++)p[i]=(u8)(v>>(8*i));}
 static void put64addr(u8*p,void*v){put32(p,(u32)v);put32(p+4,0);}
@@ -102,21 +75,7 @@ static int sleep_ms(u32 milliseconds){
  __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r7):"memory");
  return (int)r0;
 }
-static u32 hash_bytes(const u8*data,u32 size){
- u32 hash=2166136261u;
- for(u32 i=0;i<size;i++){hash^=data[i];hash*=16777619u;}
- return hash;
-}
-static long elapsed_us(const mono_ts*a,const mono_ts*b){
- return (b->tv_sec-a->tv_sec)*1000000L+(b->tv_nsec-a->tv_nsec)/1000L;
-}
-static void raw_output(const u8 *pix,u32 n){
- long fd=sopenat("/data/local/tmp/mstar_frame.raw",577,0644);
- if(fd<0){out("FRAME: cannot create raw\n");return;}
- u32 total=0;
- while(total<n){long a=swrite((int)fd,pix+total,n-total);if(a<=0)break;total+=(u32)a;}
- sclose(fd);out("FRAME: RAW bytes written=");num((int)total);out("\n");
-}
+
 /* Автономный ARM32-бинарник: программная поддержка беззнакового деления. */
 __attribute__((used)) unsigned int __aeabi_uidiv(unsigned int dividend,unsigned int divisor){
  if(!divisor)return 0;
@@ -126,35 +85,8 @@ __attribute__((used)) unsigned int __aeabi_uidiv(unsigned int dividend,unsigned 
  }
  return quotient;
 }
-static void usage(void){
- out("MStar parametric capture v2.3 (Android 11 ARM32)\n");
- out("Usage: mstar_probe --capture X Y SRC_W SRC_H OUT_W OUT_H [--allow-4k]\n");
- out("       --bench X Y SRC_W SRC_H OUT_W OUT_H N [--allow-4k] [--period-ms MS]\n");
- out("       N=2..30; optional period-ms=25..200 (start-to-start target).\n");
- out("       Default: 80ms idle between captures; disconnect after each frame.\n");
- out("       --capture is one frame; --bench measures repeated capture call times.\n");
- out("       mstar_probe --info-hdmi | --symbols | --help\n");
- out("Ex: --capture 0 0 1280 720 160 90 (tested 8:1)\n");
- out("Ex: --capture 0 0 1920 1080 160 90 (EXPERIMENTAL 12:1)\n");
- out("4K: --capture 0 0 3840 2160 480 270 --allow-4k (EXPERIMENTAL)\n");
- out("Files: /data/local/tmp/mstar_hdmi.log, mstar_frame.raw, mstar_frame.bmp\n");
-}
+
 /* BMP BI_RGB, 32 бита, сверху вниз: байты MStar идут в порядке B,G,R,A. */
-static int save_bmp(const char*path,const u8*pix,u32 width,u32 height,u32 length){
- u8 b[54];zero(b,54);b[0]='B';b[1]='M';put32(b+2,54u+length);
- put32(b+10,54);put32(b+14,40);put32(b+18,width);put32(b+22,0u-height);
- b[26]=1;b[28]=32;put32(b+34,length);
- long fd=sopenat(path,577,0644);
- if(fd<0)return -1;
- if(swrite((int)fd,b,54)!=54){sclose(fd);return -2;}
- u32 total=0;
- while(total<length){long n=swrite((int)fd,pix+total,length-total);
-  if(n<=0)break;total+=(u32)n;}
- sclose(fd);return total==length?0:-3;
-}
-
-
-
 
 /* stdout: ширина и высота (u32, little-endian), далее пиксели RGB888.
  * stderr: диагностические сообщения. Инициализация MTAL/VSS однократная;
