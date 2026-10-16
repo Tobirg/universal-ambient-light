@@ -74,6 +74,7 @@ fun RemoteHostScreen(onBackClick: () -> Unit) {
     var enabled by remember { mutableStateOf(RemoteControlService.isEnabled(context)) }
     var code by remember { mutableStateOf(config.code) }
     var running by remember { mutableStateOf(RemoteControlService.sRunning) }
+    var blocked by remember { mutableStateOf(RemoteControlService.sBlocked) }
     var port by remember { mutableIntStateOf(RemoteControlService.sPort) }
     var clients by remember { mutableStateOf(RemoteControlService.sClients) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -84,6 +85,7 @@ fun RemoteHostScreen(onBackClick: () -> Unit) {
     DisposableEffect(Unit) {
         val listener = RemoteControlService.Listener {
             running = RemoteControlService.sRunning
+            blocked = RemoteControlService.sBlocked
             port = RemoteControlService.sPort
             clients = RemoteControlService.sClients
         }
@@ -140,6 +142,11 @@ fun RemoteHostScreen(onBackClick: () -> Unit) {
                 when {
                     !enabled -> Text(
                         text = stringResource(R.string.remote_host_disabled),
+                        color = MaterialTheme.colorScheme.error
+                    )
+
+                    blocked -> Text(
+                        text = stringResource(R.string.remote_host_blocked),
                         color = MaterialTheme.colorScheme.error
                     )
 

@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.vasmarfas.UniversalAmbientLight.common.util.AnalyticsHelper
@@ -14,6 +16,7 @@ import com.vasmarfas.UniversalAmbientLight.common.util.PermissionHelper
 import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
 import com.vasmarfas.UniversalAmbientLight.R
 import com.vasmarfas.UniversalAmbientLight.ui.remote.LocalRemote
+import kotlinx.coroutines.launch
 
 /**
  * Общие настройки и отладочная информация.
@@ -22,6 +25,7 @@ import com.vasmarfas.UniversalAmbientLight.ui.remote.LocalRemote
 internal fun ColumnScope.GeneralSection(prefs: Preferences, state: SettingsScreenState) {
     val context = LocalContext.current
     val remote = LocalRemote.current
+    val scope = rememberCoroutineScope()
     SettingsGroup(title = stringResource(R.string.pref_group_general)) {
         CheckBoxPreference(
             prefs = prefs,
@@ -79,7 +83,14 @@ internal fun ColumnScope.GeneralSection(prefs: Preferences, state: SettingsScree
                 AnalyticsHelper.logSettingChanged(context, "language", language)
                 AnalyticsHelper.updateLanguageProperty(context, language)
                 LocaleHelper.setLocale(context, language)
-                (context as? Activity)?.recreate()
+                // Диалог выбора закрывается на следующей композиции. Пересоздание с ещё открытым
+                // окном диалога на ТВ-прошивках кончалось ANR с простаивающим главным потоком:
+                // нажатия уходили в окно старого активити
+                scope.launch {
+                    withFrameNanos { }
+                    withFrameNanos { }
+                    (context as? Activity)?.recreate()
+                }
             }
         )
         ClickablePreference(

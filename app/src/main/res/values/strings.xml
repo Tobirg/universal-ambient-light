@@ -529,6 +529,7 @@
   <string name="remote_host_instructions">On the phone open Universal Ambient Light → TV remote → Scan QR code. The phone and the TV must be on the same network.</string>
   <string name="remote_host_disabled">Control from a phone is off</string>
   <string name="remote_host_no_network">The TV is not connected to a network</string>
+  <string name="remote_host_blocked">The TV firmware does not let the service run in the background, so a phone cannot connect. Grant the autostart permissions in Settings, General</string>
   <string name="remote_host_no_clients">No phones connected</string>
   <string name="remote_host_clients">Connected: %1$s</string>
   <string name="remote_host_enable">Allow control from a phone</string>

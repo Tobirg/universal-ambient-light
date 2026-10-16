@@ -75,7 +75,6 @@ class ScreenGrabberService : Service() {
 
     private var mForegroundFailed = false
     private var mForegroundStarted = false
-    private var mTclBlocked = false
     private var mHandler: Handler? = null
     private var mStandby: StandbyController? = null
 
@@ -667,14 +666,10 @@ class ScreenGrabberService : Service() {
                     else
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
 
-                    val foregroundStarted = tryStartForegroundCompat(foregroundType)
+                    if (!tryStartForegroundCompat(foregroundType)) return stopWithoutForeground()
 
                     val isPrepared = prepared()
                     if (isPrepared) {
-                        if (!foregroundStarted && mTclBlocked) {
-                            mStandby?.acquireWakeLock()
-                        }
-
                         if (useMediaProjection) {
                             try {
                                 startScreenRecord(intent)
@@ -702,14 +697,10 @@ class ScreenGrabberService : Service() {
 
                 ACTION_START_CAMERA -> if (mHyperionThread == null) {
                     mCaptureSource = "camera"
-                    val foregroundStarted = tryStartForegroundCamera()
+                    if (!tryStartForegroundCamera()) return stopWithoutForeground()
 
                     val isPrepared = prepared()
                     if (isPrepared) {
-                        if (!foregroundStarted && mTclBlocked) {
-                            mStandby?.acquireWakeLock()
-                        }
-
                         startCameraCapture()
                         registerEventReceiver()
                     } else {
@@ -719,13 +710,11 @@ class ScreenGrabberService : Service() {
 
                 ACTION_START_EFFECT -> if (mHyperionThread == null) {
                     mCaptureSource = "effect"
-                    val foregroundStarted =
-                        tryStartForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                    if (!tryStartForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)) {
+                        return stopWithoutForeground()
+                    }
 
                     if (prepared()) {
-                        if (!foregroundStarted && mTclBlocked) {
-                            mStandby?.acquireWakeLock()
-                        }
                         startEffect()
                         registerEventReceiver()
                     } else {
@@ -874,21 +863,15 @@ class ScreenGrabberService : Service() {
             mForegroundStarted = true
         } catch (e: Exception) {
             Log.w(TAG, "ensureForegroundStarted failed (type=$type): ${e.message}")
-            val msg = e.message
-            if (msg != null && (msg.contains("TclAppBoot") || msg.contains("forbid"))) {
-                mTclBlocked = true
-            }
         }
     }
 
     private fun tryStartForegroundCompat(type: Int): Boolean {
         if (mForegroundStarted) {
             mForegroundFailed = false
-            mTclBlocked = false
             return true
         }
         mForegroundFailed = false
-        mTclBlocked = false
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -904,10 +887,6 @@ class ScreenGrabberService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "Foreground start failed: " + e.message)
             mForegroundFailed = true
-            val msg = e.message
-            if (msg != null && (msg.contains("TclAppBoot") || msg.contains("forbid"))) {
-                mTclBlocked = true
-            }
         }
 
         if (mForegroundFailed) {
@@ -922,12 +901,10 @@ class ScreenGrabberService : Service() {
                     startForeground(NOTIFICATION_ID, notification)
                 }
                 mForegroundFailed = false
-                mTclBlocked = false
                 mForegroundStarted = true
                 return true
             } catch (e: Exception) {
                 Log.e(TAG, "Foreground retry failed: " + e.message)
-                mTclBlocked = true
             }
         }
 
@@ -938,11 +915,9 @@ class ScreenGrabberService : Service() {
     private fun tryStartForegroundCamera(): Boolean {
         if (mForegroundStarted) {
             mForegroundFailed = false
-            mTclBlocked = false
             return true
         }
         mForegroundFailed = false
-        mTclBlocked = false
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -958,10 +933,6 @@ class ScreenGrabberService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "Foreground start (camera) failed: " + e.message)
             mForegroundFailed = true
-            val msg = e.message
-            if (msg != null && (msg.contains("TclAppBoot") || msg.contains("forbid"))) {
-                mTclBlocked = true
-            }
         }
 
         // Повторная попытка
@@ -977,12 +948,10 @@ class ScreenGrabberService : Service() {
                     startForeground(NOTIFICATION_ID, notification)
                 }
                 mForegroundFailed = false
-                mTclBlocked = false
                 mForegroundStarted = true
                 return true
             } catch (e: Exception) {
                 Log.e(TAG, "Foreground retry (camera) failed: " + e.message)
-                mTclBlocked = true
             }
         }
 
@@ -1042,6 +1011,19 @@ class ScreenGrabberService : Service() {
         intent.putExtra(BROADCAST_TCL_BLOCKED, true)
         intent.putExtra(BROADCAST_ERROR, "Foreground service blocked by device manufacturer")
         sendStatusBroadcast(intent)
+    }
+
+    /**
+     * Сервис, поднятый через startForegroundService, обязан выйти в foreground. Если прошивка
+     * этого не дала (TCL и похожие запрещают startForeground), Android сам останавливает такой
+     * сервис через 10 секунд и следом поднимает ANR. Останавливаемся сразу: от платформы
+     * остаётся только исключение о невызванном startForeground, его гасит AmbilightApplication,
+     * а подсказку по TCL MainActivity уже получила из notifyTclBlocked.
+     */
+    private fun stopWithoutForeground(): Int {
+        Log.w(TAG, "Foreground start is blocked, stopping before the platform timeout")
+        stopSelf()
+        return START_NOT_STICKY
     }
 
     private fun haltStartup() {
