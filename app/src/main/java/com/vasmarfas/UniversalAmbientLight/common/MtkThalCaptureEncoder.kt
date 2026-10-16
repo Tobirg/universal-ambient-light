@@ -246,7 +246,7 @@ class MtkThalCaptureEncoder(
                     arrayOf(
                         "su",
                         "-c",
-                        "test -f $THAL_LIB_PATH && test -e $DMA_HEAP_PATH && echo OK"
+                        "(test -f /vendor/lib/libmtal.so || (test -f $THAL_LIB_PATH && test -e $DMA_HEAP_PATH)) && echo OK"
                     )
                 )
                 val completed = process.waitFor(AVAILABILITY_CHECK_TIMEOUT_SEC, TimeUnit.SECONDS)
