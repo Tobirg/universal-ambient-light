@@ -122,7 +122,7 @@
     <item>Screencap (Root)</item>
     <item>ADB (Screenshot, ~200ms)</item>
     <item>Accessibility (Android 11+)</item>
-    <item>MTK Hardware Capture (Root)</item>
+    <item>Hardware Capture (MTK/MStar, Root)</item>
   </string-array>
   <string-array name="pref_list_capture_method_values">
     <item>media_projection</item>
