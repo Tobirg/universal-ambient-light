@@ -13,6 +13,8 @@ import java.io.DataInputStream
 import java.io.EOFException
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Аппаратный захват MStar через VSS/DIP с правами root.
@@ -32,6 +34,7 @@ class MStarVssCaptureEncoder(
     @Volatile private var running = false
     @Volatile private var capturing = false
     @Volatile private var process: java.lang.Process? = null
+    @Volatile private var nativePid: AtomicInteger? = null
     private var worker: HandlerThread? = null
     private var handler: Handler? = null
     @Volatile private var session = 0
@@ -116,8 +119,47 @@ class MStarVssCaptureEncoder(
         return destination
     }
 
+    // Запрос остановки не блокирует главный поток Android.
+    private fun requestStop(proc: java.lang.Process) {
+        try {
+            proc.outputStream.write(1)
+            proc.outputStream.flush()
+        } catch (_: IOException) { /* Процесс мог уже завершиться. */ }
+    }
+
+    private fun stopProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) {
+        requestStop(proc)
+        try {
+            if (proc.waitFor(1500, TimeUnit.MILLISECONDS)) return
+            // Если su оставил дочерний процесс, посылаем сигнал только его PID
+            // после проверки пути исполняемого файла; killall не используется.
+            val pid = pidHolder?.get() ?: -1
+            if (pid > 1) {
+                val killCommand = "exe=\$(readlink /proc/\$pid/exe 2>/dev/null); " +
+                    "case \"\$exe\" in /data/local/tmp/mstar_vss_server|" +
+                    "'/data/local/tmp/mstar_vss_server (deleted)') kill -TERM \$pid;; esac"
+                try {
+                    val killer = Runtime.getRuntime().exec(arrayOf("su", "-c", killCommand))
+                    killer.waitFor(700, TimeUnit.MILLISECONDS)
+                    killer.destroy()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Не удалось отправить SIGTERM процессу VSS", e)
+                }
+                if (proc.waitFor(700, TimeUnit.MILLISECONDS)) return
+            }
+            proc.destroy()
+            if (!proc.waitFor(500, TimeUnit.MILLISECONDS)) proc.destroyForcibly()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            proc.destroy()
+        } finally {
+            try { proc.outputStream.close() } catch (_: IOException) { }
+        }
+    }
+
     private fun runCapture(expectedSession: Int) {
         var ownProcess: java.lang.Process? = null
+        var ownPid: AtomicInteger? = null
         try {
             val args = params()
             val expectedWidth = args[4].toInt()
@@ -135,15 +177,25 @@ class MStarVssCaptureEncoder(
                 "LD_LIBRARY_PATH=/vendor/lib:/system/lib exec '$target' ${args.joinToString(" ")}"
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             ownProcess = proc
-            if (!running || session != expectedSession) { proc.destroy(); return }
-            process = proc
+            val pidHolder = AtomicInteger(-1)
+            ownPid = pidHolder
             Thread({
                 try {
                     proc.errorStream.bufferedReader().forEachLine { line ->
-                        if (line.isNotBlank()) Log.w(TAG, "[VSS] $line")
+                        if (line.startsWith("MSTAR_PID=")) {
+                            line.removePrefix("MSTAR_PID=").toIntOrNull()?.let { pid ->
+                                if (pid > 1) pidHolder.set(pid)
+                            }
+                        } else if (line.isNotBlank()) Log.w(TAG, "[VSS] $line")
                     }
                 } catch (_: IOException) { }
             }, "MStar-stderr").apply { isDaemon = true }.start()
+            if (!running || session != expectedSession) {
+                stopProcess(proc, pidHolder)
+                return
+            }
+            process = proc
+            nativePid = pidHolder
 
             val input = DataInputStream(proc.inputStream)
             val header = ByteArray(8)
@@ -172,11 +224,16 @@ class MStarVssCaptureEncoder(
                 onFatalError?.invoke("MStar hardware capture stopped: ${e.message}")
             }
         } finally {
-            ownProcess?.destroy()
+            if (session == expectedSession) {
+                ownProcess?.let { stopProcess(it, ownPid) }
+            } else {
+                // При обычной остановке завершение контролирует отдельный поток.
+                ownProcess?.let { requestStop(it) }
+            }
             if (session == expectedSession) {
                 capturing = false
                 running = false
-                if (process === ownProcess) process = null
+                if (process === ownProcess) { process = null; nativePid = null }
                 listener.sendStatus(false)
             }
         }
@@ -197,8 +254,15 @@ class MStarVssCaptureEncoder(
         session++
         running = false
         capturing = false
-        process?.destroy()
+        val oldProcess = process
+        val oldPid = nativePid
         process = null
+        nativePid = null
+        if (oldProcess != null) {
+            Thread({ stopProcess(oldProcess, oldPid) }, "MStar-stop").apply {
+                isDaemon = true
+            }.start()
+        }
         handler?.removeCallbacksAndMessages(null)
         worker?.quitSafely()
         worker = null
