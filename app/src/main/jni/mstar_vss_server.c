@@ -54,6 +54,23 @@ static long swrite(int fd,const void*p,u32 n) {
  return r0;
 }
 
+// Эксклюзивный файловый замок автоматически снимается ядром при завершении процесса.
+static long sopenat(const char*p,int flags,int mode){
+ register long r0 __asm__("r0")=-100;
+ register const char*r1 __asm__("r1")=p;
+ register long r2 __asm__("r2")=flags;
+ register long r3 __asm__("r3")=mode;
+ register long r7 __asm__("r7")=322;
+ __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r2),"r"(r3),"r"(r7):"memory");
+ return r0;
+}
+static long sflock(int fd,int operation){
+ register long r0 __asm__("r0")=fd;
+ register long r1 __asm__("r1")=operation;
+ register long r7 __asm__("r7")=143;
+ __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r7):"memory");
+ return r0;
+}
 /* mmap2 на ARM32: анонимная доступная для записи память данного процесса. */
 static void *smmap(u32 size) {
  register long r0 __asm__("r0")=0;
@@ -143,6 +160,16 @@ __attribute__((used,noinline)) static int entry(u32*sp){
  if(srcw==0||srch==0||((unsigned long long)x+srcw)>0xffffffffull||((unsigned long long)y+srch)>0xffffffffull||
     w==0||h==0||((unsigned long long)srcw*h > (unsigned long long)srch*w ? (unsigned long long)srcw*h - (unsigned long long)srch*w : (unsigned long long)srch*w - (unsigned long long)srcw*h) > (unsigned long long)srcw||
     fps==0||((unsigned long long)w*h)>((0xffffffffull-256ull)/4ull)){eprint("ERROR invalid geometry or fps\n");return 2;}
+ // Не допускаем одновременных сессий VSS. Замок сохраняется до выхода процесса;
+ // при быстром перезапуске даём предыдущему экземпляру время завершиться.
+ long lockfd=sopenat("/data/local/tmp/mstar_vss_server.lock",66,0600);
+ if(lockfd<0){eprint("VSS lock file open failed\n");return 11;}
+ int acquired=0;
+ for(int attempt=0;attempt<40;attempt++){
+   if(sflock((int)lockfd,6)==0){acquired=1;break;}
+   sleep_ms(100);
+ }
+ if(!acquired){eprint("VSS already active (lock busy)\n");return 12;}
  const u32 pixlen=w*h*4u,rgblen=w*h*3u;
  u8*pix=(u8*)smmap(pixlen+256u),*rgb=(u8*)smmap(rgblen);
  if((u32)pix>=0xfffff001u||(u32)rgb>=0xfffff001u){eprint("mmap failed\n");return 3;}
