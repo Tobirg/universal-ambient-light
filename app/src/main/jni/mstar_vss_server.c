@@ -7,7 +7,44 @@ typedef unsigned char u8;
 extern void *dlopen(const char *, int);
 extern void *dlsym(void *, const char *);
 extern char *dlerror(void);
+extern void (*signal(int, void (*)(int)))(int);
+static volatile int stop_requested=0;
+static void on_stop_signal(int sig){(void)sig;stop_requested=1;}
 #define RTLD_NOW 2
+// Признак остановки читается между кадрами; в обработчике сигнала драйвер не вызываем.
+static long sread(int fd,void*p,u32 n) {
+ register long r0 __asm__("r0")=fd;
+ register void*r1 __asm__("r1")=p;
+ register u32 r2 __asm__("r2")=n;
+ register long r7 __asm__("r7")=3;
+ __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r2),"r"(r7):"memory");
+ return r0;
+}
+static long sgetpid(void){
+ register long r0 __asm__("r0");
+ register long r7 __asm__("r7")=20;
+ __asm__ volatile("svc #0":"=r"(r0):"r"(r7):"memory");
+ return r0;
+}
+typedef struct {int fd;short events;short revents;} poll_fd;
+static int spoll(poll_fd*p,u32 count,int timeout){
+ register long r0 __asm__("r0")=(long)p;
+ register long r1 __asm__("r1")=count;
+ register long r2 __asm__("r2")=timeout;
+ register long r7 __asm__("r7")=168;
+ __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r2),"r"(r7):"memory");
+ return (int)r0;
+}
+static int should_stop(void){
+ if(stop_requested)return 1;
+ poll_fd p={0,1,0};
+ if(spoll(&p,1,0)>0 && (p.revents&1)){
+   u8 cmd=0;
+   if(sread(0,&cmd,1)>0)return 1;
+ }
+ // Закрытый stdin сам по себе не означает остановку: su может не передать его.
+ return stop_requested;
+}
 static long swrite(int fd,const void*p,u32 n) {
  register long r0 __asm__("r0")=fd;
  register const void*r1 __asm__("r1")=p;
@@ -88,6 +125,11 @@ __attribute__((used)) unsigned int __aeabi_uidiv(unsigned int dividend,unsigned 
  */
 static void eprint(const char *s){ long keep=outfd; outfd=2;out(s);outfd=keep; }
 static void ecode(const char *s,int n){long keep=outfd;outfd=2;out(s);num(n);out("\n");outfd=keep;}
+static int finish_vss(void*disconnect,int code){
+ int ret=((int(*)(u32))disconnect)(0);
+ if(ret)ecode("VSS disconnect ret=",ret);
+ return code;
+}
 static int send_all(const u8*buf,u32 n){
  u32 done=0;while(done<n){long rc=swrite(1,buf+done,n-done);if(rc<=0)return 0;done+=(u32)rc;}return 1;
 }
@@ -113,6 +155,10 @@ __attribute__((used,noinline)) static int entry(u32*sp){
  if(st){ecode("MTAL_Init error=",st);return 6;}
  st=((int(*)(void))vss)();
  if(st){ecode("MTVSS_Init error=",st);return 7;}
+ // SIGPIPE не должен прерывать процесс до освобождения VSS.
+ signal(13,(void(*)(int))1);
+ signal(15,on_stop_signal);
+ eprint("MSTAR_PID=");{long keep=outfd;outfd=2;num((int)sgetpid());out("\n");outfd=keep;}
  eprint("MStar VSS stream started\n");
  u8 pkt[72],result[64],hdr[8];zero(pkt,72);zero(hdr,8);
  put32(pkt,x);put32(pkt+4,y);put32(pkt+8,srcw);put32(pkt+12,srch);
@@ -122,6 +168,7 @@ __attribute__((used,noinline)) static int entry(u32*sp){
  u32 frame=0,paced_frames=0;int consecutive_error=0;
  mono_ts origin={0},ts={0};monotime(&origin);
  while(1){
+   if(should_stop())return finish_vss(disc,0);
    for(u32 i=0;i<pixlen+256u;i++)pix[i]=0xa5;
    zero(result,64);
    int cr=((int(*)(u32,void*,void*))cap)(0,pkt,result);
@@ -135,14 +182,15 @@ __attribute__((used,noinline)) static int entry(u32*sp){
    if(cr||!changed||guard){
      ecode("VSS capture ret=",cr);
      consecutive_error++;
-     if(guard){eprint("Buffer overrun detected; fatal\n");((int(*)(u32))disc)(0);return 9;}
-     if(consecutive_error>=3){eprint("Too many capture errors; stopping\n");((int(*)(u32))disc)(0);return 10;}
+     if(guard){eprint("Buffer overrun detected; fatal\n");return finish_vss(disc,9);}
+     if(consecutive_error>=3){eprint("Too many capture errors; stopping\n");return finish_vss(disc,10);}
      sleep_ms(500);continue;
    }
    consecutive_error=0;
    for(u32 i=0,j=0;i<pixlen;i+=4){rgb[j++]=pix[i+2];rgb[j++]=pix[i+1];rgb[j++]=pix[i];}
-   if(!send_all(hdr,8)||!send_all(rgb,rgblen)){eprint("Output pipe closed\n");((int(*)(u32))disc)(0);return 0;}
+   if(!send_all(hdr,8)||!send_all(rgb,rgblen)){eprint("Output pipe closed\n");return finish_vss(disc,0);}
    frame++;paced_frames++;
+   if(should_stop())return finish_vss(disc,0);
    // Счётчик ограничен 100000: разложение деления не переполняет 32 бита
    // и не требует библиотеки 64-битного деления в автономном ARM32-бинарнике.
    monotime(&ts);
