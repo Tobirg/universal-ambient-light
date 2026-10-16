@@ -76,6 +76,9 @@ internal fun ColumnScope.CaptureSection(prefs: Preferences, state: SettingsScree
             // Доступные методы решает устройство, которое снимает экран: в режиме пульта —
             // телевизор (флейвор, MTK, служба доступности), а не телефон
             val remoteCaps = remote?.caps
+            // Проверка аппаратного захвата выполняется в фоне: первый вызов может вернуть false.
+            // Повторно читаем результат до 5 секунд, чтобы пункт MTK/MStar стал доступен
+            // без повторного открытия настроек. В режиме пульта используем возможности ТВ.
             val mtkAvailable by produceState(initialValue = MtkThalCaptureEncoder.isAvailable(), remoteCaps) {
                 if (remoteCaps == null) {
                     repeat(20) {
