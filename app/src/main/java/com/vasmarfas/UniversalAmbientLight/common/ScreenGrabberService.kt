@@ -1301,8 +1301,10 @@ class ScreenGrabberService : Service() {
             }
             val encoder: CaptureBackend =
                 if (MStarVssCaptureEncoder.isAvailable()) {
+                    if (DEBUG) Log.v(TAG, "Creating MStar VSS Capture encoder")
                     MStarVssCaptureEncoder(applicationContext, gate, options, fatal)
                 } else {
+                    if (DEBUG) Log.v(TAG, "Creating MTK THAL Capture encoder")
                     MtkThalCaptureEncoder(
                         applicationContext, gate,
                         metrics.widthPixels, metrics.heightPixels, options, fatal
