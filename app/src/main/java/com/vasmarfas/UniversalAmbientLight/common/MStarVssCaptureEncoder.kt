@@ -5,12 +5,10 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
 import android.util.Log
-import com.vasmarfas.UniversalAmbientLight.R
 import com.vasmarfas.UniversalAmbientLight.common.network.HyperionThread
 import com.vasmarfas.UniversalAmbientLight.common.util.AppOptions
 import com.vasmarfas.UniversalAmbientLight.common.util.BorderProcessor
 import com.vasmarfas.UniversalAmbientLight.common.util.ColorProcessor
-import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
 import java.io.DataInputStream
 import java.io.EOFException
 import java.io.File
@@ -122,6 +120,8 @@ class MStarVssCaptureEncoder(
         var ownProcess: java.lang.Process? = null
         try {
             val args = params()
+            val expectedWidth = args[4].toInt()
+            val expectedHeight = args[5].toInt()
             val bin = binary()
             // Запускаем бинарник из каталога, проверенного диагностической утилитой.
             // Исполнение из закрытого каталога приложения может блокироваться noexec или SELinux.
@@ -151,15 +151,19 @@ class MStarVssCaptureEncoder(
                 input.readFully(header)
                 val width = leInt(header, 0)
                 val height = leInt(header, 4)
-                if (width <= 0 || height <= 0 || width.toLong() * height * 3L > Int.MAX_VALUE)
-                    throw IOException("Invalid MStar frame header $width x $height")
+                // Принимаем только запрошенную геометрию, чтобы повреждённый заголовок
+                // не привёл к выделению огромного массива или рассинхронизации потока.
+                if (width != expectedWidth || height != expectedHeight ||
+                    width.toLong() * height * 3L > Int.MAX_VALUE)
+                    throw IOException("Invalid MStar frame header $width x $height (expected $expectedWidth x $expectedHeight)")
                 val rgb = ByteArray(width * height * 3)
                 input.readFully(rgb)
                 if (!running || session != expectedSession) break
-                if (!capturing) { capturing = true; listener.sendStatus(true) }
                 ColorProcessor.processRgbData(rgb, options)
                 val crop = borders.applyForEncoder(rgb, width, height, options)
                 listener.sendFrame(crop.rgb, crop.width, crop.height)
+                // Уведомляем UAL только после успешно отправленного первого кадра.
+                if (!capturing) { capturing = true; listener.sendStatus(true) }
             }
             if (running && session == expectedSession) throw EOFException("MStar capture process stopped")
         } catch (e: Exception) {
