@@ -82,14 +82,36 @@ class MStarVssCaptureEncoder(
 
     private fun binary(): File {
         val destination = File(context.filesDir, BINARY)
-        // Перед каждым запуском заменяем бинарник, чтобы не использовать старую версию после обновления APK.
+        // Сверяем извлечённый файл с APK: не перезаписываем бинарник без изменения версии.
         val zipPath = context.applicationInfo.sourceDir
         val abi = "armeabi-v7a" // Библиотеки производителя на этой платформе 32-разрядные
         java.util.zip.ZipFile(zipPath).use { zip ->
             val entry = zip.getEntry("lib/$abi/lib$BINARY.so")
                 ?: throw IOException("MStar native executable missing in APK")
-            zip.getInputStream(entry).use { input ->
-                destination.outputStream().use { output -> input.copyTo(output) }
+            fun currentBinaryMatches(): Boolean {
+                if (!destination.isFile || destination.length() != entry.size) return false
+                val crc = java.util.zip.CRC32()
+                destination.inputStream().use { stream ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val length = stream.read(buffer)
+                        if (length < 0) break
+                        crc.update(buffer, 0, length)
+                    }
+                }
+                return crc.value == entry.crc
+            }
+            if (!currentBinaryMatches()) {
+                val temporary = File(context.filesDir, "$BINARY.new")
+                try {
+                    zip.getInputStream(entry).use { input ->
+                        temporary.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (!temporary.renameTo(destination))
+                        throw IOException("Cannot update MStar native executable")
+                } finally {
+                    temporary.delete()
+                }
             }
         }
         if (!destination.setExecutable(true, false)) throw IOException("Cannot chmod MStar native executable")
