@@ -31,11 +31,6 @@ static void *smmap(u32 size) {
 }
 
 
-/* Прямые системные вызовы ARM EABI без зависимости от оболочки ADB/su. */
-
-
-
-
 static long outfd=1;
 static u32 slen(const char*s){u32 i=0;while(s&&s[i])i++;return i;}
 static void out(const char*s){if(s)swrite((int)outfd,s,slen(s));}
@@ -86,8 +81,6 @@ __attribute__((used)) unsigned int __aeabi_uidiv(unsigned int dividend,unsigned 
  return quotient;
 }
 
-/* BMP BI_RGB, 32 бита, сверху вниз: байты MStar идут в порядке B,G,R,A. */
-
 /* stdout: ширина и высота (u32, little-endian), далее пиксели RGB888.
  * stderr: диагностические сообщения. Инициализация MTAL/VSS однократная;
  * CaptureOne вызывается для каждого кадра, DisconnectEx — при завершении.
@@ -133,9 +126,11 @@ __attribute__((used,noinline)) static int entry(u32*sp){
    zero(result,64);
    int cr=((int(*)(u32,void*,void*))cap)(0,pkt,result);
    u32 changed=0,guard=0;
+   // Проверяем защитную область и при ошибке CaptureOne: драйвер мог
+   // изменить память до возврата ненулевого статуса.
+   for(u32 i=pixlen;i<pixlen+256u;i++)if(pix[i]!=0xa5){guard=1;break;}
    if(cr==0){
      for(u32 i=0;i<pixlen;i++)if(pix[i]!=0xa5){changed=1;break;}
-     for(u32 i=pixlen;i<pixlen+256u;i++)if(pix[i]!=0xa5){guard=1;break;}
    }
    if(cr||!changed||guard){
      ecode("VSS capture ret=",cr);
