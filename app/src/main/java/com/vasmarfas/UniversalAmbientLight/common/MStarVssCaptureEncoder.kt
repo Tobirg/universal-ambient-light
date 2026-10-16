@@ -104,9 +104,12 @@ class MStarVssCaptureEncoder(
             // Запускаем бинарник из каталога, проверенного диагностической утилитой.
             // Исполнение из закрытого каталога приложения может блокироваться noexec или SELinux.
             // Диагностический /data/local/tmp/mstar_probe не перезаписываем.
-            val command = "cp ${bin.absolutePath} /data/local/tmp/mstar_vss_server && " +
-                "chmod 700 /data/local/tmp/mstar_vss_server && " +
-                "LD_LIBRARY_PATH=/vendor/lib:/system/lib exec /data/local/tmp/mstar_vss_server ${args.joinToString(" ")}"
+            // Устанавливаем бинарник только при изменении содержимого, заменяя его атомарно.
+            val target = "/data/local/tmp/mstar_vss_server"
+            val command = "if ! cmp -s '${bin.absolutePath}' '$target'; then " +
+                "cp '${bin.absolutePath}' '${target}.new' && " +
+                "chmod 700 '${target}.new' && mv -f '${target}.new' '$target' || exit 1; fi; " +
+                "LD_LIBRARY_PATH=/vendor/lib:/system/lib exec '$target' ${args.joinToString(" ")}"
             val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
             ownProcess = proc
             if (!running || session != expectedSession) { proc.destroy(); return }
