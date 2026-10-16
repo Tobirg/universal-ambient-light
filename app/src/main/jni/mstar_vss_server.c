@@ -200,17 +200,16 @@ __attribute__((used,noinline)) static int entry(u32*sp){
    for(u32 i=0;i<pixlen+256u;i++)pix[i]=0xa5;
    zero(result,64);
    int cr=((int(*)(u32,void*,void*))cap)(0,pkt,result);
-   int ds=0;
    u32 changed=0,guard=0;
-   if(cr==0&&ds==0){
+   if(cr==0){
      for(u32 i=0;i<pixlen;i++)if(pix[i]!=0xa5){changed=1;break;}
      for(u32 i=pixlen;i<pixlen+256u;i++)if(pix[i]!=0xa5){guard=1;break;}
    }
-   if(cr||ds||!changed||guard){
-     ecode("VSS capture ret=",cr);ecode("VSS disconnect ret=",ds);
+   if(cr||!changed||guard){
+     ecode("VSS capture ret=",cr);
      consecutive_error++;
-     if(guard){eprint("Buffer overrun detected; fatal\n");return 9;}
-     if(consecutive_error>=3){eprint("Too many capture errors; stopping\n");return 10;}
+     if(guard){eprint("Buffer overrun detected; fatal\n");((int(*)(u32))disc)(0);return 9;}
+     if(consecutive_error>=3){eprint("Too many capture errors; stopping\n");((int(*)(u32))disc)(0);return 10;}
      sleep_ms(500);continue;
    }
    consecutive_error=0;
