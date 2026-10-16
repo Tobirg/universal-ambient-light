@@ -1,4 +1,4 @@
-name: Build clean MT5889 APK
+name: Build clean MStar APK
 on:
   push:
     branches: [feature/mt5889-clean]
@@ -19,12 +19,12 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager --channel=3 --install 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;28.2.13676358'
-      - name: Compile MT5889 VSS ARM32 server
+      - name: Compile MStar VSS ARM32 server
         run: |
           mkdir -p app/src/main/jniLibs/armeabi-v7a
           NDK_BIN="$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          "$NDK_BIN/armv7a-linux-androideabi30-clang" -O2 -fPIE -fno-stack-protector -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -fuse-ld=lld -Wl,-pie -Wl,-dynamic-linker,/system/bin/linker -Wl,--no-as-needed app/src/main/jni/mt5889_vss_server.c -ldl -lc -o app/src/main/jniLibs/armeabi-v7a/libmt5889_vss_server.so
-          file app/src/main/jniLibs/armeabi-v7a/libmt5889_vss_server.so
+          "$NDK_BIN/armv7a-linux-androideabi30-clang" -O2 -fPIE -fno-stack-protector -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -fuse-ld=lld -Wl,-pie -Wl,-dynamic-linker,/system/bin/linker -Wl,--no-as-needed app/src/main/jni/mstar_vss_server.c -ldl -lc -o app/src/main/jniLibs/armeabi-v7a/libmstar_vss_server.so
+          file app/src/main/jniLibs/armeabi-v7a/libmstar_vss_server.so
       - uses: gradle/actions/setup-gradle@v4
       - name: Assemble full debug APK
         run: |
@@ -32,12 +32,6 @@ jobs:
           ./gradlew :app:assembleFullDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: ual-mt5889-clean-apk
+          name: ual-mstar-vss-apk
           path: app/build/outputs/apk/full/debug/*.apk
           if-no-files-found: error
-      - name: Remove superseded integration branch
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/feature/mt5889-native"
