@@ -135,9 +135,9 @@ class MStarVssCaptureEncoder(
             // после проверки пути исполняемого файла; killall не используется.
             val pid = pidHolder?.get() ?: -1
             if (pid > 1) {
-                val killCommand = "exe=\$(readlink /proc/\$pid/exe 2>/dev/null); " +
+                val killCommand = "exe=\$(readlink /proc/$pid/exe 2>/dev/null); " +
                     "case \"\$exe\" in /data/local/tmp/mstar_vss_server|" +
-                    "'/data/local/tmp/mstar_vss_server (deleted)') kill -TERM \$pid;; esac"
+                    "'/data/local/tmp/mstar_vss_server (deleted)') kill -TERM $pid;; esac"
                 try {
                     val killer = Runtime.getRuntime().exec(arrayOf("su", "-c", killCommand))
                     killer.waitFor(700, TimeUnit.MILLISECONDS)
