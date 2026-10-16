@@ -52,11 +52,25 @@ class Mt5889VssCaptureEncoder(
     }
 
     private fun params(): List<String> {
-        // Use actual TV display mode rather than a fixed 3840x2160 coordinate region.
+        // MStar's panel resolution may differ from Android's 1920x1080 UI mode.
+        fun panelSize(property: String): Pair<Int, Int>? {
+            val value = try {
+                val systemProperties = Class.forName("android.os.SystemProperties")
+                val get = systemProperties.getMethod("get", String::class.java)
+                get.invoke(null, property) as? String
+            } catch (_: Exception) { null } ?: return null
+            val parts = value.trim().lowercase().split("x")
+            if (parts.size != 2) return null
+            val w = parts[0].trim().toIntOrNull() ?: return null
+            val h = parts[1].trim().toIntOrNull() ?: return null
+            return if (w in 1..16384 && h in 1..16384) w to h else null
+        }
         val display = context.getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
         val mode = display.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.mode
-        val sw = (mode?.physicalWidth ?: 1920).coerceAtLeast(1)
-        val sh = (mode?.physicalHeight ?: 1080).coerceAtLeast(1)
+        val (sw, sh) = panelSize("vendor.display-size")
+            ?: panelSize("sys.display-size")
+            ?: ((mode?.physicalWidth ?: 1920).coerceAtLeast(1) to
+                (mode?.physicalHeight ?: 1080).coerceAtLeast(1))
         val width = options.captureQuality.coerceAtLeast(1)
         val ow = width.coerceAtMost(sw)
         val oh = (sh.toLong() * ow / sw).toInt().coerceAtLeast(1)
