@@ -4,7 +4,7 @@ on:
     branches: [feature/mt5889-clean]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -25,11 +25,28 @@ jobs:
           NDK_BIN="$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin"
           "$NDK_BIN/armv7a-linux-androideabi30-clang" -O2 -fPIE -fno-stack-protector -ffreestanding -fno-builtin -fno-unwind-tables -fno-asynchronous-unwind-tables -nostdlib -fuse-ld=lld -Wl,-pie -Wl,-dynamic-linker,/system/bin/linker -Wl,--no-as-needed app/src/main/jni/mstar_vss_server.c -ldl -lc -o app/src/main/jniLibs/armeabi-v7a/libmstar_vss_server.so
           file app/src/main/jniLibs/armeabi-v7a/libmstar_vss_server.so
+      - name: Check native architecture and unresolved helper symbols
+        run: |
+          set -eu
+          NDK_BIN="$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          LIB=app/src/main/jniLibs/armeabi-v7a/libmstar_vss_server.so
+          "$NDK_BIN/llvm-readelf" -h "$LIB" | grep -q 'Machine:.*ARM'
+          "$NDK_BIN/llvm-readelf" -d "$LIB" | grep NEEDED
+          if "$NDK_BIN/llvm-nm" -D --undefined-only "$LIB" | grep -E '__aeabi_|__udiv'; then
+            echo "Unexpected unresolved ARM runtime helper" >&2
+            exit 1
+          fi
       - uses: gradle/actions/setup-gradle@v4
       - name: Assemble full debug APK
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleFullDebug --no-daemon --stacktrace
+      - name: Verify APK contains native VSS executable
+        run: |
+          set -eu
+          APK=$(find app/build/outputs/apk/full/debug -name '*.apk' -print -quit)
+          test -n "$APK"
+          unzip -Z -1 "$APK" | grep -qx 'lib/armeabi-v7a/libmstar_vss_server.so'
       - uses: actions/upload-artifact@v4
         with:
           name: ual-mstar-vss-apk
