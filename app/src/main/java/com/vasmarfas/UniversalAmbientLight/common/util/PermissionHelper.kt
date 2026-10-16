@@ -5,6 +5,8 @@ import android.app.AlertDialog
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionConfig
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -82,6 +84,18 @@ object PermissionHelper {
             }
         }
     }
+
+    /**
+     * Запрос записи экрана. Android 14+ по умолчанию предлагает показать одно приложение, и
+     * подсветка тогда видит только его окно, а не весь экран. Конфигурация основного дисплея
+     * оставляет в системном диалоге только весь экран.
+     */
+    fun screenCaptureIntent(manager: MediaProjectionManager): Intent =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+        } else {
+            manager.createScreenCaptureIntent()
+        }
 
     fun hasProjectMediaPermission(context: Context): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {

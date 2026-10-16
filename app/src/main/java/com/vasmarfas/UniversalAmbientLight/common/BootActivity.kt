@@ -15,6 +15,7 @@ import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import com.vasmarfas.UniversalAmbientLight.R
+import com.vasmarfas.UniversalAmbientLight.common.util.PermissionHelper
 import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
 import com.vasmarfas.UniversalAmbientLight.common.util.UsbSerialPermissionHelper
 import com.vasmarfas.UniversalAmbientLight.common.util.openAccessibilitySettings
@@ -134,7 +135,7 @@ class BootActivity : AppCompatActivity() {
         if (manager != null) {
             try {
                 startActivityForResult(
-                    manager.createScreenCaptureIntent(),
+                    PermissionHelper.screenCaptureIntent(manager),
                     REQUEST_MEDIA_PROJECTION
                 )
             } catch (e: android.content.ActivityNotFoundException) {

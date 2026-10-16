@@ -179,15 +179,20 @@ class AmbilightApplication : Application() {
     }
 
     /**
-     * `ForegroundServiceDidNotStartInTimeException` для нашего же сервиса захвата. На
-     * некоторых прошивках (например, TCL) startForeground() заблокирован, сервис осознанно
-     * продолжает работать без уведомления, и платформа позже принудительно бросает это
-     * исключение. Сужено до нашего пакета, чтобы настоящая ошибка «забыли вызвать
-     * startForeground» в другом месте всё-таки всплыла.
+     * `ForegroundServiceDidNotStartInTimeException` для нашего же сервиса. На некоторых
+     * прошивках (например, TCL) startForeground() заблокирован: сервис захвата и сервер пульта
+     * в этом случае сразу останавливаются сами, и платформа бросает в приложение это
+     * исключение, хотя сервиса уже нет. Android 11 и ниже присылает то же самое как
+     * RemoteServiceException с тем же текстом. Сужено до нашего пакета, чтобы настоящая
+     * ошибка «забыли вызвать startForeground» в другом месте всё-таки всплыла.
      */
     private fun isForegroundServiceTimeout(t: Throwable): Boolean {
-        if (!t.javaClass.name.contains("ForegroundServiceDidNotStartInTimeException")) return false
-        return t.message?.contains(packageName) == true
+        val name = t.javaClass.name
+        val message = t.message ?: return false
+        val matches = name.contains("ForegroundServiceDidNotStartInTimeException") ||
+                (name == "android.app.RemoteServiceException" &&
+                        message.contains("did not then call Service.startForeground"))
+        return matches && message.contains(packageName)
     }
 
     /**

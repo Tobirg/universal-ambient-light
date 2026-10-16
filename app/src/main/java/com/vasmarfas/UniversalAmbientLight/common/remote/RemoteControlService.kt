@@ -73,7 +73,13 @@ class RemoteControlService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForegroundCompat(buildNotification(emptyList()))
+        // Без foreground Android через 10 секунд сам остановит сервис и поднимет ANR.
+        // Останавливаемся сразу, экран сопряжения объяснит почему
+        sBlocked = !startForegroundCompat(buildNotification(emptyList()))
+        if (sBlocked) {
+            stopSelf()
+            return
+        }
 
         val config = RemoteHostConfig(this)
         mConfig = config
@@ -228,8 +234,8 @@ class RemoteControlService : Service() {
         mNsdListener = null
     }
 
-    private fun startForegroundCompat(notification: Notification) {
-        try {
+    private fun startForegroundCompat(notification: Notification): Boolean {
+        return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceCompat.startForeground(
                     this, NOTIFICATION_ID, notification,
@@ -238,10 +244,11 @@ class RemoteControlService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+            true
         } catch (e: Exception) {
-            // Прошивки с запретом автозапуска (TCL и похожие) не дают выйти в foreground;
-            // сервер при этом работает, пока система не выгрузит процесс
+            // Прошивки с запретом автозапуска (TCL и похожие) не дают выйти в foreground
             Log.w(TAG, "startForeground failed: ${e.message}")
+            false
         }
     }
 
@@ -294,6 +301,11 @@ class RemoteControlService : Service() {
 
         @Volatile
         var sPort = RemoteProtocol.DEFAULT_PORT
+            private set
+
+        /** Прошивка не дала сервису выйти в foreground, и он остановился, не подняв сервер. */
+        @Volatile
+        var sBlocked = false
             private set
 
         /** Имена подключённых телефонов — для экрана сопряжения на ТВ. */

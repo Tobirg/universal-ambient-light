@@ -509,6 +509,7 @@
   <string name="remote_host_instructions">На телефоне откройте Universal Ambient Light → Пульт для ТВ → Сканировать QR-код. Телефон и ТВ должны быть в одной сети.</string>
   <string name="remote_host_disabled">Управление с телефона выключено</string>
   <string name="remote_host_no_network">ТВ не подключён к сети</string>
+  <string name="remote_host_blocked">Прошивка ТВ не даёт службе работать в фоне, поэтому телефон не подключится. Выдайте разрешения для автозапуска: Настройки, раздел «Общие»</string>
   <string name="remote_host_no_clients">Телефоны не подключены</string>
   <string name="remote_host_clients">Подключены: %1$s</string>
   <string name="remote_host_enable">Разрешить управление с телефона</string>

@@ -122,6 +122,11 @@ object AdbSetup {
             // Статистика использования нужна только задержке по приложениям - в проверку
             // успеха ниже не входит
             add("appops set $pkg GET_USAGE_STATS allow")
+            // Запрет выхода в foreground на TCL и похожих прошивках снимается этой операцией,
+            // без неё там не работают ни подсветка, ни пульт. На остальных она и так разрешена
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                add("appops set $pkg START_FOREGROUND allow")
+            }
             add("cmd deviceidle whitelist +$pkg")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add("pm grant $pkg android.permission.POST_NOTIFICATIONS")

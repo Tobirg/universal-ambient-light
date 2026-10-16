@@ -631,7 +631,7 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            val captureIntent = projectionManager.createScreenCaptureIntent()
+            val captureIntent = PermissionHelper.screenCaptureIntent(projectionManager)
             startActivityForResult(captureIntent, REQUEST_MEDIA_PROJECTION)
         } catch (e: SecurityException) {
             Log.e(TAG, "Screen capture permission denied: " + e.message)
