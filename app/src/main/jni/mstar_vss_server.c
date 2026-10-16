@@ -217,11 +217,12 @@ __attribute__((used,noinline)) static int entry(u32*sp){
    for(u32 i=0,j=0;i<pixlen;i+=4){rgb[j++]=pix[i+2];rgb[j++]=pix[i+1];rgb[j++]=pix[i];}
    if(!send_all(hdr,8)||!send_all(rgb,rgblen)){eprint("Output pipe closed\n");((int(*)(u32))disc)(0);return 0;}
    frame++;paced_frames++;
-   // Регулирование темпа кадров без постоянного холостого опроса.
-   monotime(&ts);long age=elapsed_ms(&origin,&ts);
+   // Расчёт времени в 64 битах исключает переполнение счётчика кадров.
+   monotime(&ts);
    if(paced_frames>=100000u){origin=ts;paced_frames=0;}
-   long target=(long)((paced_frames*1000u)/fps);
-   if(target>age)sleep_ms((u32)(target-age));
+   long age=elapsed_ms(&origin,&ts);
+   unsigned long long target=((unsigned long long)paced_frames*1000u)/fps;
+   if(target>(unsigned long long)(age<0?0:age))sleep_ms((u32)(target-(unsigned long long)(age<0?0:age)));
  }
 }
 __asm__(".global _start\n_start:\n mov r0, sp\n bl entry\n mov r7, #1\n svc #0\n");
