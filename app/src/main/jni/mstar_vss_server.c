@@ -1,16 +1,10 @@
-/* MStar MTAL VSS parametric capture / Android 11 ARM32.
-   --symbols: only dlopen and dlsym (no driver calls).
-   --inspect-log: call native MTAL_Init in THIS process, then two getter ioctl
-       wrappers: MTVSS_GetVssVideoInform and MTVSS_GetScreenCaptureMode.
-       No GetConfig ioctl 0xC040291B (unsupported by this device).
-   Optional --vss-init-home / --vss-init-hdmi performs MTVSS_Init(), a vendor
-   initialization ioctl, before read-only getters; can alter VSS internal state.
-   --connect0-hdmi / --connect0-home: explicit experimental ConnectEx(0) with a
-   matching DisconnectEx(0) cleanup on normal completion. No StartCapture or buffers.
-   Only use with unprotected HDMI desktop, not DRM material.
-   Logging is done to fixed paths /data/local/tmp/mstar_home.log and /data/local/tmp/mstar_hdmi.log using raw write(2)
-   before and after every vendor call, so ADB disconnect loses no log.
-   Does not start/stop capture, program frame buffers, or change device perms.
+/* Параметрический захват MStar через MTAL VSS, Android 11, ARM32.
+   Диагностика символов использует dlopen/dlsym без обращения к драйверу.
+   Режимы диагностики могут читать состояние VSS через функции MTAL.
+   Экспериментальные команды инициализации и подключения способны изменять
+   внутреннее состояние VSS — применять их следует только осознанно.
+   Диагностические журналы используют постоянные пути в /data/local/tmp.
+   Потоковый режим передаёт кадры непосредственно через stdout.
 */
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -35,7 +29,7 @@ static long sopenat(const char*p,int flags,int mode) {
  __asm__ volatile("svc #0":"+r"(r0):"r"(r1),"r"(r2),"r"(r3),"r"(r7):"memory");
  return r0;
 }
-/* mmap2 on ARM32: anonymous writable mapping solely owned by this process. */
+/* mmap2 на ARM32: анонимная доступная для записи память данного процесса. */
 static void *smmap(u32 size) {
  register long r0 __asm__("r0")=0;
  register long r1 __asm__("r1")=size;
@@ -52,7 +46,7 @@ static long sunlink(const char*path){register const char*r0 __asm__("r0")=path;r
 static long sclose(long fd){register long r0 __asm__("r0")=fd;
  register long r7 __asm__("r7")=6;
  __asm__ volatile("svc #0":"+r"(r0):"r"(r7):"memory");return r0;}
-/* ARM EABI raw syscalls for full detachment from adb shell/su transport. */
+/* Прямые системные вызовы ARM EABI без зависимости от оболочки ADB/su. */
 static long sfork(void){register long r0 __asm__("r0");register long r7 __asm__("r7")=2;
  __asm__ volatile("svc #0":"=r"(r0):"r"(r7):"memory");return r0;}
 static long ssetsid(void){register long r0 __asm__("r0");register long r7 __asm__("r7")=66;
@@ -71,7 +65,7 @@ static void hex(u32 x){out("0x");hexn(x,8);}
 static void num(int x){unsigned int n=(unsigned int)x;if(x<0){out("-");n=0-n;}
  char b[12];int i=0;do{b[i++]='0'+n%10;n/=10;}while(n&&i<11);
  while(i--)swrite((int)outfd,b+i,1);}
-/* CLOCK_MONOTONIC, ARM32 legacy clock_gettime. Timer only: no driver side effects. */
+/* Монотонные часы ARM32: только отсчёт времени, без обращения к драйверу. */
 typedef struct {long tv_sec; long tv_nsec;} mono_ts;
 static int monotime(mono_ts*t){
  register long r0 __asm__("r0")=1; /* CLOCK_MONOTONIC */
@@ -92,14 +86,14 @@ static void bytes(const u8*p,u32 n){for(u32 i=0;i<n;i++){
 static void zero(u8*p,u32 n){while(n--)*p++=0;}
 static void put32(u8*p,u32 v){for(int i=0;i<4;i++)p[i]=(u8)(v>>(8*i));}
 static void put64addr(u8*p,void*v){put32(p,(u32)v);put32(p+4,0);}
-/* Strict decimal CLI parser; refuse negative values, overflow, garbage. */
+/* Строгий разбор десятичных аргументов: запрет отрицательных чисел и переполнений. */
 static int dec(const char*s,u32*value){
  if(!s||!*s)return 0;u32 v=0;
  while(*s){if(*s<'0'||*s>'9')return 0;u32 digit=(u32)(*s++-'0');
   if(v>429496729u||(v==429496729u&&digit>5u))return 0;v=v*10u+digit;}
  *value=v;return 1;
 }
-/* Long enough delay to reduce risk when repeatedly driving a reverse-engineered CAP interface. */
+/* Пауза между попытками уменьшает нагрузку на исследуемый интерфейс захвата. */
 static int sleep_ms(u32 milliseconds){
  struct {long sec; long nanosec;} req={milliseconds/1000u,(long)(milliseconds%1000u)*1000000L};
  register long r0 __asm__("r0")=(long)&req;
@@ -123,7 +117,7 @@ static void raw_output(const u8 *pix,u32 n){
  while(total<n){long a=swrite((int)fd,pix+total,n-total);if(a<=0)break;total+=(u32)a;}
  sclose(fd);out("FRAME: RAW bytes written=");num((int)total);out("\n");
 }
-/* Freestanding ARM32 executable: provide software unsigned divide helper. */
+/* Автономный ARM32-бинарник: программная поддержка беззнакового деления. */
 __attribute__((used)) unsigned int __aeabi_uidiv(unsigned int dividend,unsigned int divisor){
  if(!divisor)return 0;
  unsigned int quotient=0;
@@ -145,7 +139,7 @@ static void usage(void){
  out("4K: --capture 0 0 3840 2160 480 270 --allow-4k (EXPERIMENTAL)\n");
  out("Files: /data/local/tmp/mstar_hdmi.log, mstar_frame.raw, mstar_frame.bmp\n");
 }
-/* Top-down 32-bit BI_RGB BMP: MStar bytes appear as B,G,R,A. No conversion. */
+/* BMP BI_RGB, 32 бита, сверху вниз: байты MStar идут в порядке B,G,R,A. */
 static int save_bmp(const char*path,const u8*pix,u32 width,u32 height,u32 length){
  u8 b[54];zero(b,54);b[0]='B';b[1]='M';put32(b+2,54u+length);
  put32(b+10,54);put32(b+14,40);put32(b+18,width);put32(b+22,0u-height);
@@ -162,9 +156,10 @@ static int save_bmp(const char*path,const u8*pix,u32 width,u32 height,u32 length
 
 
 
-/* Binary stdout: u32 LE width, u32 LE height, followed by RGB888 pixel bytes.
- * stderr: diagnostic text. One MTAL_Init/MTVSS_Init per process,
- * CaptureOne/DisconnectEx per frame. No double fork and no filesystem writes.
+/* stdout: ширина и высота (u32, little-endian), далее пиксели RGB888.
+ * stderr: диагностические сообщения. Инициализация MTAL/VSS однократная;
+ * CaptureOne вызывается для каждого кадра, DisconnectEx — при завершении.
+ * Без двойного fork и записи кадров в файловую систему.
  */
 static void eprint(const char *s){ long keep=outfd; outfd=2;out(s);outfd=keep; }
 static void ecode(const char *s,int n){long keep=outfd;outfd=2;out(s);num(n);out("\n");outfd=keep;}
@@ -222,7 +217,7 @@ __attribute__((used,noinline)) static int entry(u32*sp){
    for(u32 i=0,j=0;i<pixlen;i+=4){rgb[j++]=pix[i+2];rgb[j++]=pix[i+1];rgb[j++]=pix[i];}
    if(!send_all(hdr,8)||!send_all(rgb,rgblen)){eprint("Output pipe closed\n");((int(*)(u32))disc)(0);return 0;}
    frame++;paced_frames++;
-   // Frame-start rate limit, avoids artificial busy-loop load.
+   // Регулирование темпа кадров без постоянного холостого опроса.
    monotime(&ts);long age=elapsed_ms(&origin,&ts);
    if(paced_frames>=100000u){origin=ts;paced_frames=0;}
    long target=(long)((paced_frames*1000u)/fps);
