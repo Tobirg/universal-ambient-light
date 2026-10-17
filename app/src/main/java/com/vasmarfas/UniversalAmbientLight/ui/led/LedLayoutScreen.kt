@@ -42,6 +42,7 @@ import com.vasmarfas.UniversalAmbientLight.common.ScreenGrabberService
 import com.vasmarfas.UniversalAmbientLight.common.network.OutputType
 import com.vasmarfas.UniversalAmbientLight.common.util.AnalyticsHelper
 import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
+import com.vasmarfas.UniversalAmbientLight.common.util.UsbSerialPermissionHelper
 import com.vasmarfas.UniversalAmbientLight.R
 import com.vasmarfas.UniversalAmbientLight.ui.remote.LocalRemote
 import com.vasmarfas.UniversalAmbientLight.ui.remote.rememberSettingsPreferences
@@ -62,13 +63,43 @@ fun LedLayoutScreen(
     val supportsLayoutTest =
         OutputType.of(prefs.getString(R.string.pref_key_connection_type)) == OutputType.ADALIGHT
     var layoutTestEnabled by remember { mutableStateOf(false) }
+    var layoutTestPending by remember { mutableStateOf(false) }
     val onLayoutTestChange: (Boolean) -> Unit = { enabled ->
-        layoutTestEnabled = enabled
-        sendLayoutTest(context, layoutTestEnabled)
+        if (!enabled) {
+            layoutTestPending = false
+            layoutTestEnabled = false
+            sendLayoutTest(context, false)
+        } else if (!layoutTestEnabled && !layoutTestPending) {
+            // Сервис не может показать системный USB-диалог сам: он открывает порт
+            // уже после получения разрешения. Запрашиваем его в контексте экрана,
+            // включая первый запуск ленты без единого запуска видеозахвата.
+            layoutTestPending = true
+            UsbSerialPermissionHelper.ensurePermissionForSerialDevice(
+                context = context,
+                device = null,
+                onReady = {
+                    // Запрос мог завершиться уже после выхода со страницы.
+                    if (layoutTestPending) {
+                        layoutTestPending = false
+                        layoutTestEnabled = true
+                        sendLayoutTest(context, true)
+                    }
+                },
+                onDenied = {
+                    layoutTestPending = false
+                    layoutTestEnabled = false
+                },
+                // Ручной повтор после отказа должен повторно показать системный диалог.
+                force = true,
+            )
+        }
     }
-    // Выход со страницы всегда возвращает обычный видеозахват.
+    // При закрытии экрана отменяем ожидающий запуск и возвращаем обычный вывод.
     DisposableEffect(context) {
-        onDispose { sendLayoutTest(context, false) }
+        onDispose {
+            layoutTestPending = false
+            sendLayoutTest(context, false)
+        }
     }
 
     val legacyX = prefs.getInt(R.string.pref_key_x_led)
@@ -281,7 +312,7 @@ fun LedLayoutScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    LayoutTestToggle(layoutTestEnabled, supportsLayoutTest, onLayoutTestChange)
+                    LayoutTestToggle(layoutTestEnabled, supportsLayoutTest && !layoutTestPending, onLayoutTestChange)
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -497,7 +528,7 @@ fun LedLayoutScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    LayoutTestToggle(layoutTestEnabled, supportsLayoutTest, onLayoutTestChange)
+                    LayoutTestToggle(layoutTestEnabled, supportsLayoutTest && !layoutTestPending, onLayoutTestChange)
 
                     Spacer(modifier = Modifier.height(12.dp))
 
