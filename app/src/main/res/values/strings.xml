@@ -861,4 +861,11 @@
   <string name="pref_title_z2m_base_topic">Zigbee2MQTT base topic</string>
   <string name="lamps_hint_z2m">The list comes from the broker, Zigbee2MQTT keeps it there. Check the broker address, login and base topic.</string>
   <string name="led_layout_direct_test">Direct LED side test</string>
+    <string name="adalight_rgbw_direct_title">Direct RGBW (SK6812 / HyperSerial v11+)</string>
+    <string name="adalight_rgbw_direct_help">Only for the AWA protocol and SK6812 RGBW firmware v11 or later. Uses 4-byte AWa packets. Keep off for regular RGB strips or older firmware.</string>
+    <string name="adalight_rgbw_gain">White channel strength</string>
+    <string name="adalight_rgbw_red">White LED red contribution</string>
+    <string name="adalight_rgbw_green">White LED green contribution</string>
+    <string name="adalight_rgbw_blue">White LED blue contribution</string>
+    <string name="adalight_rgbw_help">0–255 per channel: calibrate the white LED's color. This is a simple RGBW converter, not HyperHDR ICE dithering.</string>
 </resources>
