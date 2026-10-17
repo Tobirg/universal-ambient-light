@@ -195,6 +195,7 @@ class MStarVssCaptureEncoder(
 
     // Полная остановка выполняется единственный раз, вне главного потока Android.
     private fun finishProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) {
+        Log.i(TAG, "Остановка MStar VSS, PID=" + (pidHolder?.get() ?: -1))
         requestStop(proc)
         try {
             // Сначала ждём штатного закрытия канала. Даже если su уже завершился,
