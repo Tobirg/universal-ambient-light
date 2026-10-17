@@ -521,6 +521,11 @@ class HyperionThread(
 
                 if (newClient != null && newClient.isConnected()) {
                     installRecoveredClient(newClient)
+                    // Восстановление через путь send/keepalive должно подтверждать
+                    // соединение так же, как восстановление из потока кадров.
+                    if (mClient.get() === newClient && !mExecutor.isShutdown) {
+                        mCallback.onConnected()
+                    }
                 }
             } catch (ignored: IOException) {
             }
