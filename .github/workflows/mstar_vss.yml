@@ -37,10 +37,10 @@ jobs:
             exit 1
           fi
       - uses: gradle/actions/setup-gradle@v4
-      - name: Assemble full debug APK
+      - name: Assemble and test full debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleFullDebug --no-daemon --stacktrace
+          ./gradlew :app:assembleFullDebug :app:testFullDebugUnitTest --no-daemon --stacktrace
       - name: Verify APK contains native VSS executable
         run: |
           set -eu
