@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.vasmarfas.UniversalAmbientLight.common.ScreenGrabberService
+import com.vasmarfas.UniversalAmbientLight.common.network.OutputType
 import com.vasmarfas.UniversalAmbientLight.common.util.AnalyticsHelper
 import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
 import com.vasmarfas.UniversalAmbientLight.R
@@ -58,6 +59,8 @@ fun LedLayoutScreen(
     val configuration = LocalConfiguration.current
     // В режиме пульта раскладка правится у телевизора — через зеркало его настроек
     val prefs = rememberSettingsPreferences()
+    val supportsLayoutTest =
+        OutputType.of(prefs.getString(R.string.pref_key_connection_type)) == OutputType.ADALIGHT
     var layoutTestEnabled by remember { mutableStateOf(false) }
     val onLayoutTestChange: (Boolean) -> Unit = { enabled ->
         layoutTestEnabled = enabled
@@ -278,7 +281,7 @@ fun LedLayoutScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    LayoutTestToggle(layoutTestEnabled, onLayoutTestChange)
+                    LayoutTestToggle(layoutTestEnabled, supportsLayoutTest, onLayoutTestChange)
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -676,7 +679,11 @@ fun LedLayoutScreen(
 }
 
 @Composable
-private fun LayoutTestToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun LayoutTestToggle(
+    checked: Boolean,
+    available: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -689,6 +696,7 @@ private fun LayoutTestToggle(checked: Boolean, onCheckedChange: (Boolean) -> Uni
         )
         Switch(
             checked = checked,
+            enabled = available,
             onCheckedChange = onCheckedChange,
         )
     }
