@@ -143,6 +143,9 @@ __attribute__((used,noinline)) static int entry(u32*sp){
  if(srcw==0||srch==0||((unsigned long long)x+srcw)>0xffffffffull||((unsigned long long)y+srch)>0xffffffffull||
     w==0||h==0||((unsigned long long)srcw*h > (unsigned long long)srch*w ? (unsigned long long)srcw*h - (unsigned long long)srch*w : (unsigned long long)srch*w - (unsigned long long)srcw*h) > (unsigned long long)srcw||
     fps==0||((unsigned long long)w*h)>((0xffffffffull-256ull)/4ull)){eprint("ERROR invalid geometry or fps\n");return 2;}
+ // Сообщаем PID до обращения к библиотеке производителя, чтобы остановка
+ // работала даже если инициализация VSS надолго зависнет.
+ eprint("MSTAR_PID=");{long keep=outfd;outfd=2;num((int)sgetpid());out("\n");outfd=keep;}
  const u32 pixlen=w*h*4u,rgblen=w*h*3u;
  u8*pix=(u8*)smmap(pixlen+256u),*rgb=(u8*)smmap(rgblen);
  if((u32)pix>=0xfffff001u||(u32)rgb>=0xfffff001u){eprint("mmap failed\n");return 3;}
@@ -158,7 +161,6 @@ __attribute__((used,noinline)) static int entry(u32*sp){
  // SIGPIPE не должен прерывать процесс до освобождения VSS.
  signal(13,(void(*)(int))1);
  signal(15,on_stop_signal);
- eprint("MSTAR_PID=");{long keep=outfd;outfd=2;num((int)sgetpid());out("\n");outfd=keep;}
  eprint("MStar VSS stream started\n");
  u8 pkt[72],result[64],hdr[8];zero(pkt,72);zero(hdr,8);
  put32(pkt,x);put32(pkt+4,y);put32(pkt+8,srcw);put32(pkt+12,srch);
