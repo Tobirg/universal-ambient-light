@@ -300,6 +300,7 @@ fun LedLayoutScreen(
                         captureMarginLeft = captureMarginLeft.coerceIn(0, 40),
                         ledOffset = ledOffset,
                         scanDepth = scanDepth.coerceIn(1, 50),
+                        layoutTestEnabled = layoutTestEnabled,
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
@@ -368,7 +369,7 @@ fun LedLayoutScreen(
                             newText.toIntOrNull()?.let { value ->
                                 if (value >= 0) {
                                     prefs.putInt(R.string.pref_key_bottom_gap, value)
-                                    sendClearOnce(context)
+                                    if (!layoutTestEnabled) sendClearOnce(context)
                                 }
                             }
                         },
@@ -419,25 +420,25 @@ fun LedLayoutScreen(
                         onSideTopChange = { mode ->
                             sideTop = mode
                             prefs.putString(R.string.pref_key_led_side_top, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideRight = sideRight,
                         onSideRightChange = { mode ->
                             sideRight = mode
                             prefs.putString(R.string.pref_key_led_side_right, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideBottom = sideBottom,
                         onSideBottomChange = { mode ->
                             sideBottom = mode
                             prefs.putString(R.string.pref_key_led_side_bottom, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideLeft = sideLeft,
                         onSideLeftChange = { mode ->
                             sideLeft = mode
                             prefs.putString(R.string.pref_key_led_side_left, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         startCorner = startCorner,
                         onStartCornerChange = { newCorner ->
@@ -515,6 +516,7 @@ fun LedLayoutScreen(
                         captureMarginLeft = captureMarginLeft.coerceIn(0, 40),
                         ledOffset = ledOffset,
                         scanDepth = scanDepth.coerceIn(1, 50),
+                        layoutTestEnabled = layoutTestEnabled,
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
@@ -585,7 +587,7 @@ fun LedLayoutScreen(
                             newText.toIntOrNull()?.let { value ->
                                 if (value >= 0) {
                                     prefs.putInt(R.string.pref_key_bottom_gap, value)
-                                    sendClearOnce(context)
+                                    if (!layoutTestEnabled) sendClearOnce(context)
                                 }
                             }
                         },
@@ -636,25 +638,25 @@ fun LedLayoutScreen(
                         onSideTopChange = { mode ->
                             sideTop = mode
                             prefs.putString(R.string.pref_key_led_side_top, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideRight = sideRight,
                         onSideRightChange = { mode ->
                             sideRight = mode
                             prefs.putString(R.string.pref_key_led_side_right, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideBottom = sideBottom,
                         onSideBottomChange = { mode ->
                             sideBottom = mode
                             prefs.putString(R.string.pref_key_led_side_bottom, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideLeft = sideLeft,
                         onSideLeftChange = { mode ->
                             sideLeft = mode
                             prefs.putString(R.string.pref_key_led_side_left, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         startCorner = startCorner,
                         onStartCornerChange = { newCorner ->
