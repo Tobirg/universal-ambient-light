@@ -1,6 +1,7 @@
 package com.vasmarfas.UniversalAmbientLight.ui.led
 
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,8 @@ import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
 import com.vasmarfas.UniversalAmbientLight.common.util.UsbSerialPermissionHelper
 import com.vasmarfas.UniversalAmbientLight.R
 import com.vasmarfas.UniversalAmbientLight.ui.remote.LocalRemote
+import com.vasmarfas.UniversalAmbientLight.common.remote.RemoteProtocol
+import com.vasmarfas.UniversalAmbientLight.common.remote.RemoteSession
 import com.vasmarfas.UniversalAmbientLight.ui.remote.rememberSettingsPreferences
 
 internal const val MAX_LEDS_VISUALIZATION = 5000
@@ -60,21 +63,34 @@ fun LedLayoutScreen(
     val configuration = LocalConfiguration.current
     // В режиме пульта раскладка правится у телевизора — через зеркало его настроек
     val prefs = rememberSettingsPreferences()
+    val remote = LocalRemote.current
     val supportsLayoutTest =
-        OutputType.of(prefs.getString(R.string.pref_key_connection_type)) == OutputType.ADALIGHT
+        OutputType.of(prefs.getString(R.string.pref_key_connection_type)) == OutputType.ADALIGHT &&
+        (remote == null || (remote.connection == RemoteSession.Connection.CONNECTED &&
+            remote.caps?.features?.contains(RemoteProtocol.FEATURE_LAYOUT_TEST) == true))
     var layoutTestEnabled by remember { mutableStateOf(false) }
     var layoutTestPending by remember { mutableStateOf(false) }
     val onLayoutTestChange: (Boolean) -> Unit = { enabled ->
         if (!enabled) {
             layoutTestPending = false
             layoutTestEnabled = false
-            sendLayoutTest(context, false)
+            if (remote != null) RemoteSession.setRemoteLayoutTest(false)
+            else sendLayoutTest(context, false)
         } else if (!layoutTestEnabled && !layoutTestPending) {
             // Сервис не может показать системный USB-диалог сам: он открывает порт
             // уже после получения разрешения. Запрашиваем его в контексте экрана,
             // включая первый запуск ленты без единого запуска видеозахвата.
             layoutTestPending = true
-            UsbSerialPermissionHelper.ensurePermissionForSerialDevice(
+            if (remote != null) {
+                // У телефона не запрашиваем USB: провод и контроллер подключены к ТВ.
+                RemoteSession.setRemoteLayoutTest(true) { success, error ->
+                    if (layoutTestPending) {
+                        layoutTestPending = false
+                        layoutTestEnabled = success
+                        if (!success) Toast.makeText(context, error ?: "TV is unavailable", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } else UsbSerialPermissionHelper.ensurePermissionForSerialDevice(
                 context = context,
                 device = null,
                 onReady = {
@@ -95,10 +111,14 @@ fun LedLayoutScreen(
         }
     }
     // При закрытии экрана отменяем ожидающий запуск и возвращаем обычный вывод.
-    DisposableEffect(context) {
+    DisposableEffect(context, remote?.tv?.id) {
         onDispose {
+            val wasActive = layoutTestPending || layoutTestEnabled
             layoutTestPending = false
-            sendLayoutTest(context, false)
+            layoutTestEnabled = false
+            if (remote != null) {
+                if (wasActive) RemoteSession.setRemoteLayoutTest(false)
+            } else sendLayoutTest(context, false)
         }
     }
 
