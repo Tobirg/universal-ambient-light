@@ -1401,12 +1401,18 @@ class ScreenGrabberService : Service() {
             val fatal: (String) -> Unit = { errorMsg ->
                 mHandler?.post { mStartError = errorMsg; haltStartup() }
             }
+            // На некоторых ТВ есть и libmtal, и полноценный THAL. Само наличие
+            // libmtal ещё не означает поддержку MTVSS_*: в первую очередь
+            // используем самостоятельный THAL с его DMA-heap, а VSS — лишь
+            // когда подтверждённого THAL на устройстве нет.
+            val useMStar = MStarVssCaptureEncoder.isAvailable() &&
+                !MtkThalCaptureEncoder.hasNativeThalBackend()
             val encoder: CaptureBackend =
-                if (MStarVssCaptureEncoder.isAvailable()) {
-                    if (DEBUG) Log.v(TAG, "Creating MStar VSS Capture encoder")
+                if (useMStar) {
+                    Log.i(TAG, "Using MStar VSS capture backend")
                     MStarVssCaptureEncoder(applicationContext, gate, options, fatal)
                 } else {
-                    if (DEBUG) Log.v(TAG, "Creating MTK THAL Capture encoder")
+                    Log.i(TAG, "Using MTK THAL capture backend")
                     MtkThalCaptureEncoder(
                         applicationContext, gate,
                         metrics.widthPixels, metrics.heightPixels, options, fatal
