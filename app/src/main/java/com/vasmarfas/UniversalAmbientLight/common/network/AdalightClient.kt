@@ -5,6 +5,9 @@ import android.hardware.usb.UsbManager
 import android.util.Log
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.vasmarfas.UniversalAmbientLight.common.util.LedDataExtractor
+import com.vasmarfas.UniversalAmbientLight.common.util.LedLayout
+import com.vasmarfas.UniversalAmbientLight.common.util.LedLayoutTestPattern
+import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
 import com.vasmarfas.UniversalAmbientLight.common.util.UsbSerialProberFactory
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -59,6 +62,34 @@ class AdalightClient(
 
     private val mSmoothing: ColorSmoothing
     private var mLedDataBuffer: Array<ColorRgb>? = null
+
+    @Volatile private var mLayoutTestEnabled = false
+    private var mLayoutTestSnapshot: LedLayout? = null
+    private var mLayoutTestColors: Array<ColorRgb>? = null
+
+    /** Адресная проверка ленты без виртуального изображения и без переподключения USB. */
+    fun setLayoutTestEnabled(enabled: Boolean) {
+        mLayoutTestEnabled = enabled
+        if (enabled && isConnected()) updateLayoutTestColors()
+        if (!enabled) {
+            mLayoutTestSnapshot = null
+            mLayoutTestColors = null
+        }
+    }
+
+    @Synchronized
+    private fun updateLayoutTestColors() {
+        if (!mLayoutTestEnabled) return
+        val layout = LedLayout.from(Preferences(mContext))
+        if (layout != mLayoutTestSnapshot || mLayoutTestColors == null) {
+            mLayoutTestColors = LedLayoutTestPattern.build(layout)
+            mLayoutTestSnapshot = layout
+            Log.i(TAG, "Адресная проверка сторон: LED=" + mLayoutTestColors!!.size +
+                " (верх=" + layout.topLed + ", право=" + layout.rightLed +
+                ", низ=" + layout.bottomLed + ", лево=" + layout.leftLed + ")")
+        }
+        mLayoutTestColors?.takeIf { it.isNotEmpty() }?.let { mSmoothing.setTargetColors(it) }
+    }
 
     private val mKeepAlive = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "AdalightClient-keepalive").apply { isDaemon = true }
@@ -330,6 +361,12 @@ class AdalightClient(
     ) {
         if (!isConnected()) {
             throw IOException("Not connected to Adalight device")
+        }
+        // Во время проверки настройки стороны берутся из текущих preferences
+        // и превращаются в адресные цвета, минуя выделение цвета из кадра.
+        if (mLayoutTestEnabled) {
+            updateLayoutTestColors()
+            return
         }
 
         val leds = LedDataExtractor.extractLEDData(mContext, data, width, height, mLedDataBuffer)
