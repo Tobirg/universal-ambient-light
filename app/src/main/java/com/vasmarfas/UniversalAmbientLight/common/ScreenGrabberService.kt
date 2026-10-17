@@ -81,6 +81,8 @@ class ScreenGrabberService : Service() {
 
     private var mReconnectEnabled = false
     private var mHasConnected = false
+    // В отличие от mHasConnected этот флаг переживает обрывы при автоподключении.
+    private var mEverConnected = false
     private var mMediaProjectionManager: MediaProjectionManager? = null
     private var mHyperionThread: HyperionThread? = null
     private var mLayoutTestEnabled = false
@@ -191,6 +193,7 @@ class ScreenGrabberService : Service() {
         override fun onConnected() {
             if (DEBUG) Log.d(TAG, "Connected to Hyperion server")
             mHasConnected = true
+            mEverConnected = true
             val prefs = Preferences(baseContext)
             val host = prefs.getString(R.string.pref_key_host, null)
             AnalyticsHelper.logConnectionSuccess(baseContext, mConnectionType, host)
@@ -211,7 +214,14 @@ class ScreenGrabberService : Service() {
         override fun onConnectionError(errorID: Int, error: String?) {
             Log.e(TAG, "Connection error: " + (error ?: "unknown"))
             AnalyticsHelper.logConnectionError(baseContext, mConnectionType, error)
-            if (!mHasConnected) {
+            if (mEverConnected && mReconnectEnabled) {
+                // Вывод потерян, захват ещё работает: показываем переподключение,
+                // а не ложный RUNNING и не прекращаем восстановление соединения.
+                mHasConnected = false
+                mStartInProgress = true
+                notifyActivity()
+                Log.i(TAG, "Attempting automatic reconnect...")
+            } else if (!mHasConnected) {
                 mStartError = connectionErrorText(
                     R.string.error_adalight_unreachable,
                     R.string.error_lamps_unreachable,
@@ -219,9 +229,9 @@ class ScreenGrabberService : Service() {
                     R.string.error_server_unreachable
                 )
                 haltStartup()
-            } else if (mReconnectEnabled) {
-                Log.i(TAG, "Attempting automatic reconnect...")
             } else {
+                mHasConnected = false
+                mStartInProgress = false
                 mStartError = connectionErrorText(
                     R.string.error_adalight_connection_lost,
                     R.string.error_lamps_connection_lost,
@@ -688,6 +698,7 @@ class ScreenGrabberService : Service() {
                 ACTION_START -> if (mHyperionThread == null) {
                     mStartInProgress = true
                     mHasConnected = false
+                    mEverConnected = false
                     notifyActivity()
                     mCaptureSource = "screen"
                     val prefs = Preferences(this)
@@ -733,6 +744,7 @@ class ScreenGrabberService : Service() {
                 ACTION_START_CAMERA -> if (mHyperionThread == null) {
                     mStartInProgress = true
                     mHasConnected = false
+                    mEverConnected = false
                     notifyActivity()
                     mCaptureSource = "camera"
                     if (!tryStartForegroundCamera()) return stopWithoutForeground()
@@ -749,6 +761,7 @@ class ScreenGrabberService : Service() {
                 ACTION_START_EFFECT -> if (mHyperionThread == null) {
                     mStartInProgress = true
                     mHasConnected = false
+                    mEverConnected = false
                     notifyActivity()
                     mCaptureSource = "effect"
                     if (!tryStartForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)) {
@@ -802,6 +815,7 @@ class ScreenGrabberService : Service() {
                         if (mHyperionThread == null) {
                             mStartInProgress = true
                             mHasConnected = false
+                            mEverConnected = false
                             notifyActivity()
                             // При выключенном захвате открываем только USB-подключение.
                             // Ни MediaProjection, ни VSS, ни новый энкодер не запускаются.
@@ -1512,6 +1526,7 @@ class ScreenGrabberService : Service() {
     private fun stopAllCapture() {
         mStartInProgress = false
         mHasConnected = false
+        mEverConnected = false
         if (DEBUG) Log.v(TAG, "Stopping all capture")
         mReconnectEnabled = false
         mLayoutTestEnabled = false
