@@ -74,6 +74,9 @@ class MainActivity : ComponentActivity() {
     // ожидание разрешений, подключения вывода или первого кадра любого источника.
     private var mRecorderRunning by mutableStateOf(false)
     private var mLocalStartPending by mutableStateOf(false)
+    // До отправки команды сервису другие компоненты могут прислать обычный
+    // STOPPED. Такой ответ не должен отменять ожидание разрешений в этом Activity.
+    private var mLocalStartDispatched = false
 
     // Последняя ошибка сервиса — на карточке состояния главного экрана до следующего запуска
     private var mLastError by mutableStateOf<String?>(null)
@@ -140,12 +143,15 @@ class MainActivity : ComponentActivity() {
         override fun onReceive(context: Context, intent: Intent) {
             val checked = intent.getBooleanExtra(ScreenGrabberService.BROADCAST_TAG, false)
             val starting = intent.getBooleanExtra(ScreenGrabberService.BROADCAST_STARTING, false)
+            val error = intent.getStringExtra(ScreenGrabberService.BROADCAST_ERROR)
+            if (mLocalStartPending && !mLocalStartDispatched &&
+                !checked && !starting && error == null) return
             val wasRunning = mRecorderRunning
             val wasStarting = mLocalStartPending
             mRecorderRunning = checked
             mLocalStartPending = starting
 
-            val error = intent.getStringExtra(ScreenGrabberService.BROADCAST_ERROR)
+            if (!checked && !starting) mLocalStartDispatched = false
             mLastError = if (checked || starting) null else error
             mSleepAt = intent.getLongExtra(ScreenGrabberService.BROADCAST_SLEEP_AT, 0L)
             val tclBlocked =
@@ -559,6 +565,7 @@ class MainActivity : ComponentActivity() {
             val prefs = Preferences(this)
             prefs.putBoolean(R.string.pref_key_lighting_was_active, true)
             mLastError = null
+            mLocalStartDispatched = false
             mLocalStartPending = true
             val captureSource =
                 prefs.getString(R.string.pref_key_capture_source, "screen") ?: "screen"
@@ -578,6 +585,7 @@ class MainActivity : ComponentActivity() {
             // параллельную попытку. Поздние callback'и разрешений проверят pending.
             stopScreenRecorder()
             mLocalStartPending = false
+            mLocalStartDispatched = false
             mRecorderRunning = false
             finishCaptureSession("user_stop")
         }
@@ -605,6 +613,7 @@ class MainActivity : ComponentActivity() {
         if (method != "media_projection") {
             Log.d(TAG, "Alternative capture mode ($method) enabled — starting service directly")
             // startScreencapRecorder обрабатывает все альтернативные методы; имя оставлено прежним ради совместимости с BootActivity
+            mLocalStartDispatched = true
             BootActivity.startAlternativeRecorder(this)
             beginCaptureSession(
                 source = "screen",
@@ -686,6 +695,7 @@ class MainActivity : ComponentActivity() {
     private fun startEffects() {
         val prefs = Preferences(this)
         val protocol = prefs.getString(R.string.pref_key_connection_type, "hyperion") ?: "hyperion"
+        mLocalStartDispatched = true
         BootActivity.startEffects(this)
         beginCaptureSession(
             source = "effect",
@@ -702,6 +712,7 @@ class MainActivity : ComponentActivity() {
 
         val intent = Intent(this, ScreenGrabberService::class.java)
         intent.action = ScreenGrabberService.ACTION_START_CAMERA
+        mLocalStartDispatched = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
@@ -858,11 +869,12 @@ class MainActivity : ComponentActivity() {
     }
 
     fun startScreenRecorder(resultCode: Int, data: Intent) {
+        mLocalStartDispatched = true
         BootActivity.startScreenRecorder(this, resultCode, data)
     }
 
     fun stopScreenRecorder() {
-        if (mRecorderRunning || mLocalStartPending) {
+        if (mRecorderRunning || (mLocalStartPending && mLocalStartDispatched)) {
             val intent = Intent(this, ScreenGrabberService::class.java)
             intent.action = ScreenGrabberService.ACTION_EXIT
             startService(intent)
