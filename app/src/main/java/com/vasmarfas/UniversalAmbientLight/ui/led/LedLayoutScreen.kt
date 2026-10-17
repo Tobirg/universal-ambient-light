@@ -1,6 +1,7 @@
 package com.vasmarfas.UniversalAmbientLight.ui.led
 
 import android.content.Context
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,9 +20,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +58,15 @@ fun LedLayoutScreen(
     val configuration = LocalConfiguration.current
     // В режиме пульта раскладка правится у телевизора — через зеркало его настроек
     val prefs = rememberSettingsPreferences()
+    var layoutTestEnabled by remember { mutableStateOf(false) }
+    val onLayoutTestChange: (Boolean) -> Unit = { enabled ->
+        layoutTestEnabled = enabled && ScreenGrabberService.sInstanceRunning
+        sendLayoutTest(context, layoutTestEnabled)
+    }
+    // Выход со страницы всегда возвращает обычный видеозахват.
+    DisposableEffect(context) {
+        onDispose { sendLayoutTest(context, false) }
+    }
 
     val legacyX = prefs.getInt(R.string.pref_key_x_led)
     val legacyY = prefs.getInt(R.string.pref_key_y_led)
@@ -265,6 +277,10 @@ fun LedLayoutScreen(
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    LayoutTestToggle(layoutTestEnabled, onLayoutTestChange)
+
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     LedVisualization(
                         topLed = topLed,
@@ -477,6 +493,10 @@ fun LedLayoutScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
+                    LayoutTestToggle(layoutTestEnabled, onLayoutTestChange)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     LedVisualization(
                         topLed = topLed,
                         rightLed = rightLed,
@@ -651,6 +671,34 @@ fun LedLayoutScreen(
             }
         }
     }
+}
+
+@Composable
+private fun LayoutTestToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = stringResource(R.string.led_layout_direct_test),
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Switch(
+            checked = checked,
+            enabled = ScreenGrabberService.sInstanceRunning,
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
+
+private fun sendLayoutTest(context: Context, enabled: Boolean) {
+    if (!ScreenGrabberService.sInstanceRunning) return
+    context.startService(android.content.Intent(context, ScreenGrabberService::class.java).apply {
+        action = ScreenGrabberService.ACTION_LAYOUT_TEST
+        putExtra(ScreenGrabberService.EXTRA_LAYOUT_TEST_ENABLED, enabled)
+    })
 }
 
 /**
