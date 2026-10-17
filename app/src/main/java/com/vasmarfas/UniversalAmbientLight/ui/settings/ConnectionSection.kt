@@ -26,6 +26,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.vasmarfas.UniversalAmbientLight.R
 import com.vasmarfas.UniversalAmbientLight.common.network.OutputType
+import com.vasmarfas.UniversalAmbientLight.common.network.RgbwCalibration
 import com.vasmarfas.UniversalAmbientLight.common.network.Zigbee2MqttClient
 import com.vasmarfas.UniversalAmbientLight.common.util.AnalyticsHelper
 import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
@@ -208,6 +209,17 @@ internal fun ColumnScope.ConnectionSection(
                         onValueChange = { state.adalightRgbwDirect = it }
                     )
                     if (state.adalightRgbwDirect) {
+                        // One-time migration; old White Gain is replaced, not duplicated.
+                        if (!prefs.contains(R.string.pref_key_adalight_ice_white_intensity) &&
+                            prefs.contains(R.string.pref_key_adalight_white_gain)
+                        ) {
+                            prefs.putInt(
+                                R.string.pref_key_adalight_ice_white_intensity,
+                                RgbwCalibration.legacyGainToIntensity(
+                                    prefs.getInt(R.string.pref_key_adalight_white_gain, 255)
+                                )
+                            )
+                        }
                         Text(
                             text = stringResource(R.string.adalight_rgbw_help),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -216,9 +228,19 @@ internal fun ColumnScope.ConnectionSection(
                         )
                         SliderPreference(
                             prefs = prefs,
-                            keyRes = R.string.pref_key_adalight_white_gain,
-                            title = stringResource(R.string.adalight_rgbw_gain),
-                            range = 0..255,
+                            keyRes = R.string.pref_key_adalight_ice_white_intensity,
+                            title = stringResource(R.string.adalight_rgbw_intensity),
+                            range = 0..500,
+                            step = 5,
+                            summaryProvider = { "${it / 100f} ×" },
+                        )
+                        SliderPreference(
+                            prefs = prefs,
+                            keyRes = R.string.pref_key_adalight_ice_white_threshold,
+                            title = stringResource(R.string.adalight_rgbw_threshold),
+                            range = 0..100,
+                            step = 5,
+                            summaryProvider = { "${it}%" },
                         )
                         SliderPreference(
                             prefs = prefs,
