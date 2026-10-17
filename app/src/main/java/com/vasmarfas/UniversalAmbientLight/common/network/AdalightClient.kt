@@ -122,6 +122,12 @@ class AdalightClient(
     private var mLastAutoThrottlePacketSize: Int = -1
 
     init {
+        if (mRgbwDirect) {
+            Log.i(TAG, "HyperSerial AWA direct RGBW enabled: AWa, RGBW32, " +
+                "whiteGain=${mWhiteCalibration.whiteGain}, " +
+                "whiteRGB=${mWhiteCalibration.whiteRed}/" +
+                "${mWhiteCalibration.whiteGreen}/${mWhiteCalibration.whiteBlue}")
+        }
         mSmoothing = ColorSmoothing { leds -> sendLedData(leds) }
         // Применить настройки сглаживания из preferences
         // Сначала применяем пресет как базовые значения
