@@ -429,8 +429,11 @@ class HyperionThread(
                 effectiveSmoothing, mSmoothingPreset, mSettlingTime, effectiveDelayMs, mUpdateFrequency,
                 mConfig.adalightRgbwDirect,
                 RgbwCalibration(
-                    mConfig.adalightWhiteGain, mConfig.adalightWhiteRed,
-                    mConfig.adalightWhiteGreen, mConfig.adalightWhiteBlue
+                    whiteLedIntensity = mConfig.adalightIceWhiteIntensity,
+                    whiteMixerThreshold = mConfig.adalightIceWhiteMixerThreshold,
+                    whiteRed = mConfig.adalightWhiteRed,
+                    whiteGreen = mConfig.adalightWhiteGreen,
+                    whiteBlue = mConfig.adalightWhiteBlue
                 )
             )
 
