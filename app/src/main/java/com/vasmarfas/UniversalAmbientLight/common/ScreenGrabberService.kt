@@ -100,6 +100,11 @@ class ScreenGrabberService : Service() {
     private var mCaptureSource: String = "screen" // "screen", "camera" или "effect"
     private var mNotificationManager: NotificationManager? = null
     private var mStartError: String? = null
+
+    // Общая фаза запуска для любого источника кадров и любого основного вывода.
+    // Пока готовятся энкодер и подключение, отсутствие кадров НЕ означает остановку.
+    @Volatile
+    private var mStartInProgress = false
     private var mConnectionType = "hyperion"
     private var mProjectionResultCode: Int? = null
     private var mProjectionDataExtras: android.os.Bundle? = null
@@ -681,6 +686,8 @@ class ScreenGrabberService : Service() {
             if (DEBUG) Log.v(TAG, "Start command action: " + action.toString())
             when (action) {
                 ACTION_START -> if (mHyperionThread == null) {
+                    mStartInProgress = true
+                    notifyActivity()
                     mCaptureSource = "screen"
                     val prefs = Preferences(this)
                     val method =
@@ -723,6 +730,8 @@ class ScreenGrabberService : Service() {
                 }
 
                 ACTION_START_CAMERA -> if (mHyperionThread == null) {
+                    mStartInProgress = true
+                    notifyActivity()
                     mCaptureSource = "camera"
                     if (!tryStartForegroundCamera()) return stopWithoutForeground()
 
@@ -736,6 +745,8 @@ class ScreenGrabberService : Service() {
                 }
 
                 ACTION_START_EFFECT -> if (mHyperionThread == null) {
+                    mStartInProgress = true
+                    notifyActivity()
                     mCaptureSource = "effect"
                     if (!tryStartForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)) {
                         return stopWithoutForeground()
@@ -778,11 +789,16 @@ class ScreenGrabberService : Service() {
                     }
                 }
 
-                ACTION_STOP -> stopAllCapture()
+                ACTION_STOP -> {
+                    stopAllCapture()
+                    notifyActivity()
+                }
                 ACTION_LAYOUT_TEST -> {
                     val enabled = intent.getBooleanExtra(EXTRA_LAYOUT_TEST_ENABLED, false)
                     if (enabled) {
                         if (mHyperionThread == null) {
+                            mStartInProgress = true
+                            notifyActivity()
                             // При выключенном захвате открываем только USB-подключение.
                             // Ни MediaProjection, ни VSS, ни новый энкодер не запускаются.
                             val outputType = Preferences(this).getString(
@@ -1094,6 +1110,7 @@ class ScreenGrabberService : Service() {
     }
 
     private fun haltStartup() {
+        mStartInProgress = false
         // Пробуем выйти в foreground, чтобы показать ошибку, но не падаем, если это запрещено
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1489,6 +1506,7 @@ class ScreenGrabberService : Service() {
     }
 
     private fun stopAllCapture() {
+        mStartInProgress = false
         if (DEBUG) Log.v(TAG, "Stopping all capture")
         mReconnectEnabled = false
         mLayoutTestEnabled = false
@@ -1522,21 +1540,24 @@ class ScreenGrabberService : Service() {
         get() = mActiveBackend?.isCapturing() == true
 
     val isCommunicating: Boolean
-        get() = isCapturing && mHasConnected
+        get() = (isCapturing || mLayoutTestOutputOnly) && mHasConnected
 
     private fun notifyActivity() {
-        // Пока MStar ожидает первый кадр, не сообщаем «выключена» из обратных
-        // вызовов подключения. Реальный статус придёт после первого кадра
-        // либо из обработки ошибки запуска.
-        if (mStartError == null &&
-            (mActiveBackend as? MStarVssCaptureEncoder)?.isStarting() == true) return
+        // Статус RUNNING подтверждается и готовым источником (или автономным
+        // тестом ленты), и подключённым основным выводом. Для всех остальных
+        // сочетаний во время запуска сообщаем STARTING, а не ложный STOPPED.
+        val communicating = isCommunicating
+        if (communicating) mStartInProgress = false
+        val starting = mStartError == null && mStartInProgress && !communicating
         val intent = Intent(BROADCAST_FILTER)
-        intent.putExtra(BROADCAST_TAG, isCommunicating)
+        intent.putExtra(BROADCAST_TAG, communicating)
+        intent.putExtra(BROADCAST_STARTING, starting)
         intent.putExtra(BROADCAST_ERROR, mStartError)
         intent.putExtra(BROADCAST_SLEEP_AT, sSleepAt)
         if (DEBUG) {
             Log.v(
-                TAG, "Broadcasting status: communicating=" + isCommunicating +
+                TAG, "Broadcasting status: communicating=" + communicating +
+                        ", starting=" + starting +
                         if (mStartError != null) ", error=$mStartError" else ""
             )
         }
@@ -1700,6 +1721,7 @@ class ScreenGrabberService : Service() {
         val oldPrimary = mHyperionThread ?: return
         val oldSecondary = mSecondaryHyperionThread
         Log.i(TAG, "Connection settings changed, restarting the output")
+        mStartInProgress = true
         mOutput = null
         mHyperionThread = null
         mSecondaryHyperionThread = null
@@ -1798,6 +1820,7 @@ class ScreenGrabberService : Service() {
     companion object {
         const val BROADCAST_ERROR = "SERVICE_ERROR"
         const val BROADCAST_TAG = "SERVICE_STATUS"
+        const val BROADCAST_STARTING = "SERVICE_STARTING"
         const val BROADCAST_FILTER = "SERVICE_FILTER"
         const val BROADCAST_TCL_BLOCKED = "TCL_BLOCKED"
         const val BROADCAST_SLEEP_AT = "SLEEP_AT"
@@ -2036,6 +2059,7 @@ class ScreenGrabberService : Service() {
         fun notifyNotStarted(context: Context, error: String) {
             val intent = Intent(BROADCAST_FILTER)
             intent.putExtra(BROADCAST_TAG, false)
+            intent.putExtra(BROADCAST_STARTING, false)
             intent.putExtra(BROADCAST_ERROR, error)
             intent.setPackage(context.packageName)
             context.sendBroadcast(intent)
