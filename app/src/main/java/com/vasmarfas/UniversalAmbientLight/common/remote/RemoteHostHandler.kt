@@ -80,8 +80,10 @@ internal class RemoteHostHandler(
     // процесса ввода ждут замка InputInjector: его держит поток пульта, пока подключается к
     // ADB и поднимает app_process, а это до 18 секунд
     fun close() {
-        mLayoutTestClient = null
-        dispatchLayoutTest(false)
+        if (mLayoutTestClient != null) {
+            mLayoutTestClient = null
+            dispatchLayoutTest(false)
+        }
         Thread({ mInput.shutdown() }, "remote-input-shutdown").apply { isDaemon = true }.start()
     }
 
@@ -155,12 +157,16 @@ internal class RemoteHostHandler(
                     throw RemoteCommandException(RemoteProtocol.ERR_FAILED, "No USB serial device on TV")
                 mLayoutTestClient = client
                 if (ScreenGrabberService.sInstanceRunning) {
-                    dispatchLayoutTest(true)
+                    if (!dispatchLayoutTest(true)) {
+                        mLayoutTestClient = null
+                        throw RemoteCommandException(RemoteProtocol.ERR_FAILED, "TV could not start the LED test")
+                    }
                 } else {
                     UsbSerialPermissionHelper.ensurePermissionForSerialDevice(
                         context = mContext, device = null,
                         onReady = {
-                            if (mLayoutTestClient === client) dispatchLayoutTest(true)
+                            if (mLayoutTestClient === client && !dispatchLayoutTest(true))
+                                mLayoutTestClient = null
                         },
                         onDenied = {
                             if (mLayoutTestClient === client) mLayoutTestClient = null
@@ -173,8 +179,8 @@ internal class RemoteHostHandler(
         return JSONObject()
     }
 
-    private fun dispatchLayoutTest(enabled: Boolean) {
-        if (!enabled && !ScreenGrabberService.sInstanceRunning) return
+    private fun dispatchLayoutTest(enabled: Boolean): Boolean {
+        if (!enabled && !ScreenGrabberService.sInstanceRunning) return true
         val intent = Intent(mContext, ScreenGrabberService::class.java).apply {
             action = ScreenGrabberService.ACTION_LAYOUT_TEST
             putExtra(ScreenGrabberService.EXTRA_LAYOUT_TEST_ENABLED, enabled)
@@ -185,8 +191,10 @@ internal class RemoteHostHandler(
             } else {
                 mContext.startService(intent)
             }
+            return true
         } catch (e: Exception) {
             Log.w(TAG, "Remote layout test failed: ${e.message}", e)
+            return false
         }
     }
 
