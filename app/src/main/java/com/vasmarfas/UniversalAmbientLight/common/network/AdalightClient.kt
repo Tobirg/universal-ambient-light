@@ -58,6 +58,7 @@ class AdalightClient(
     // Остальные протоколы всегда получают прежние трёхканальные пакеты.
     private val mRgbwDirect = rgbwDirect && mProtocol == ProtocolType.AWA
     private val mWhiteCalibration = whiteCalibration.normalized()
+    private val mAwaRgbw = AwaRgbw() // ICE state belongs to this USB connection
 
     private var mPort: UsbSerialPort? = null
 
@@ -280,8 +281,9 @@ class AdalightClient(
                 val n = port.read(buf, HANDSHAKE_READ_TIMEOUT_MS)
                 if (n > 0) {
                     received.append(String(buf, 0, n, Charsets.US_ASCII))
-                    if (received.contains(ADA_MAGIC_WORD)) {
-                        Log.i(TAG, "Adalight handshake OK: device announced 'Ada'")
+                    if (received.contains(ADA_MAGIC_WORD) ||
+                        (mProtocol == ProtocolType.AWA && received.contains("Awa driver", ignoreCase = true))) {
+                        Log.i(TAG, "USB serial handshake OK: ${received.takeLast(64)}")
                         return
                     }
                     // Ограничиваем буфер: маркер короткий, хвоста достаточно для склейки на границе.
@@ -415,13 +417,15 @@ class AdalightClient(
         }
 
         try {
-            val packet = if (mRgbwDirect) AwaRgbw.packet(leds, mWhiteCalibration)
-                else createPacket(mProtocol, leds)
-            maybeAutoThrottle(packet.size, leds.size)
-            mLastLeds = leds
-            mLastSendMs = System.currentTimeMillis()
             synchronized(mWriteLock) {
+                // Keep ICE's temporal state in the same order as USB packet writes.
+                val packet = if (mRgbwDirect) mAwaRgbw.packet(leds, mWhiteCalibration)
+                    else createPacket(mProtocol, leds)
+                // Do not impose the legacy baud-rate/FPS estimate on USB CDC RGBW.
+                if (!mRgbwDirect) maybeAutoThrottle(packet.size, leds.size)
                 port.write(packet, 1000)
+                mLastLeds = leds
+                mLastSendMs = System.currentTimeMillis()
             }
 
             // Изредка пишем в лог для диагностики
