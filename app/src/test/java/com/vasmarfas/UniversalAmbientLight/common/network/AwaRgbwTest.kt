@@ -18,7 +18,7 @@ class AwaRgbwTest {
     }
 
     @Test
-    fun `saturated colors never generate white and gain zero disables extraction`() {
+    fun `saturated colors never generate white and intensity zero disables extraction`() {
         val saturated = AwaRgbw().packet(arrayOf(ColorRgb(255, 120, 0)), RgbwCalibration())
         assertArrayEquals(byteArrayOf(255.toByte(), 120, 0, 0), saturated.copyOfRange(6, 10))
 
