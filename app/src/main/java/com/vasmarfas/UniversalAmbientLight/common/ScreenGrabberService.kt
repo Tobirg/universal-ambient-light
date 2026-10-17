@@ -1456,6 +1456,11 @@ class ScreenGrabberService : Service() {
         get() = isCapturing && mHasConnected
 
     private fun notifyActivity() {
+        // Пока MStar ожидает первый кадр, не сообщаем «выключена» из обратных
+        // вызовов подключения. Реальный статус придёт после первого кадра
+        // либо из обработки ошибки запуска.
+        if (mStartError == null &&
+            (mActiveBackend as? MStarVssCaptureEncoder)?.isStarting() == true) return
         val intent = Intent(BROADCAST_FILTER)
         intent.putExtra(BROADCAST_TAG, isCommunicating)
         intent.putExtra(BROADCAST_ERROR, mStartError)
