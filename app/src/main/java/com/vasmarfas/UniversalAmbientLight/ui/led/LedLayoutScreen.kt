@@ -60,7 +60,7 @@ fun LedLayoutScreen(
     val prefs = rememberSettingsPreferences()
     var layoutTestEnabled by remember { mutableStateOf(false) }
     val onLayoutTestChange: (Boolean) -> Unit = { enabled ->
-        layoutTestEnabled = enabled && ScreenGrabberService.sInstanceRunning
+        layoutTestEnabled = enabled
         sendLayoutTest(context, layoutTestEnabled)
     }
     // Выход со страницы всегда возвращает обычный видеозахват.
@@ -689,14 +689,15 @@ private fun LayoutTestToggle(checked: Boolean, onCheckedChange: (Boolean) -> Uni
         )
         Switch(
             checked = checked,
-            enabled = ScreenGrabberService.sInstanceRunning,
             onCheckedChange = onCheckedChange,
         )
     }
 }
 
 private fun sendLayoutTest(context: Context, enabled: Boolean) {
-    if (!ScreenGrabberService.sInstanceRunning) return
+    // Включение теста может самостоятельно открыть USB-вывод без активного захвата.
+    // Выключение не должно создавать пустой сервис, если его уже нет.
+    if (!enabled && !ScreenGrabberService.sInstanceRunning) return
     context.startService(android.content.Intent(context, ScreenGrabberService::class.java).apply {
         action = ScreenGrabberService.ACTION_LAYOUT_TEST
         putExtra(ScreenGrabberService.EXTRA_LAYOUT_TEST_ENABLED, enabled)
