@@ -127,46 +127,55 @@ class MStarVssCaptureEncoder(
         } catch (_: IOException) { /* Процесс мог уже завершиться. */ }
     }
 
-    // Сигнал отправляется только тому PID, который сообщил наш нативный сервер.
-    // Проверка /proc/PID/exe защищает от случайного завершения чужого процесса.
-    private fun signalNative(pid: Int, signal: String) {
-        if (pid <= 1) return
-        val command = "exe=\$(readlink /proc/$pid/exe 2>/dev/null); " +
+    // После запроса остановки проверяем именно нативный PID, даже если su уже вышел.
+    // Проверка /proc/<pid>/exe перед каждым сигналом защищает от повторного использования PID.
+    // Состояние Z означает, что процесс уже не выполняется и не удерживает VSS.
+    private fun ensureNativeStopped(pid: Int) {
+        if (pid <= 1) {
+            Log.w(TAG, "PID нативного VSS не получен, подтвердить его остановку невозможно")
+            return
+        }
+        val command = "pid=$pid; " +
+            "for attempt in 1 2 3 4 5; do " +
+            "[ -r /proc/\$pid/stat ] || exit 0; " +
+            "read -r stat < /proc/\$pid/stat || exit 0; " +
+            "set -- \$stat; " +
+            "case \"\$3\" in Z|X) exit 0;; esac; " +
+            "exe=\$(readlink /proc/\$pid/exe 2>/dev/null); " +
             "case \"\$exe\" in /data/local/tmp/mstar_vss_server|" +
-            "'/data/local/tmp/mstar_vss_server (deleted)') kill -$signal $pid;; esac"
+            "'/data/local/tmp/mstar_vss_server (deleted)') ;; " +
+            "*) echo \"VSS PID identity mismatch\" >&2; exit 3;; esac; " +
+            "case \$attempt in 2) kill -TERM \$pid;; 4) kill -KILL \$pid;; esac; " +
+            "sleep 0.1; " +
+            "done; " +
+            "echo \"VSS native process did not exit\" >&2; exit 4"
         try {
-            val signalProcess = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-            if (!signalProcess.waitFor(1000, TimeUnit.MILLISECONDS)) {
-                Log.w(TAG, "Таймаут сигнала $signal для VSS PID=$pid")
-                signalProcess.destroy()
+            val check = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            if (!check.waitFor(2500, TimeUnit.MILLISECONDS)) {
+                Log.w(TAG, "Таймаут подтверждения завершения VSS PID=$pid")
+                check.destroyForcibly()
+            } else if (check.exitValue() != 0) {
+                Log.w(TAG, "Не удалось подтвердить остановку VSS PID=$pid, код=" + check.exitValue())
             }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            Log.w(TAG, "Ожидание завершения VSS прервано, PID=$pid")
         } catch (e: Exception) {
-            Log.w(TAG, "Не удалось отправить $signal для VSS PID=$pid", e)
+            Log.w(TAG, "Ошибка проверки завершения VSS PID=$pid", e)
         }
     }
 
-    // Выполняется вне главного потока; последовательные вызовы для одного процесса
-    // не должны конкурировать друг с другом.
+    // Завершение выполняется на рабочем потоке и не блокирует главный поток Android.
     private fun stopProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) = synchronized(proc) {
-        val pid = pidHolder?.get() ?: -1
-        Log.i(TAG, "Остановка MStar VSS, PID=$pid")
         requestStop(proc)
         try {
-            // Если процесс штатно завершился, не тратим время на дополнительные su
-            // и сигналы. При обычном FPS закрытие stdin обрабатывается сразу.
-            if (!proc.waitFor(250, TimeUnit.MILLISECONDS)) {
-                // У su и нативного сервера могут быть разные жизненные циклы:
-                // сигнал посылаем только PID, сообщённому самим сервером.
-                if (pid > 1) {
-                    signalNative(pid, "TERM")
-                    if (!proc.waitFor(500, TimeUnit.MILLISECONDS)) {
-                        signalNative(pid, "KILL")
-                    }
-                }
-                if (proc.isAlive) {
-                    proc.destroy()
-                    if (!proc.waitFor(250, TimeUnit.MILLISECONDS)) proc.destroyForcibly()
-                }
+            // Сначала ждём штатного закрытия канала. Даже если su уже завершился,
+            // ниже всё равно проверяем PID нативного сервера отдельно.
+            proc.waitFor(250, TimeUnit.MILLISECONDS)
+            ensureNativeStopped(pidHolder?.get() ?: -1)
+            if (proc.isAlive) {
+                proc.destroy()
+                if (!proc.waitFor(250, TimeUnit.MILLISECONDS)) proc.destroyForcibly()
             }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
