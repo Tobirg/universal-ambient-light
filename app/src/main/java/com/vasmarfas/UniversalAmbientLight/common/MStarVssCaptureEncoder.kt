@@ -242,6 +242,7 @@ class MStarVssCaptureEncoder(
 
             val input = DataInputStream(proc.inputStream)
             val header = ByteArray(8)
+            var rgbBuffer: ByteArray? = null
             while (running && session == expectedSession) {
                 input.readFully(header)
                 val width = leInt(header, 0)
@@ -251,7 +252,16 @@ class MStarVssCaptureEncoder(
                 if (width != expectedWidth || height != expectedHeight ||
                     width.toLong() * height * 3L > Int.MAX_VALUE)
                     throw IOException("Invalid MStar frame header $width x $height (expected $expectedWidth x $expectedHeight)")
-                val rgb = ByteArray(width * height * 3)
+                // UAL синхронно копирует кадр в HyperionThread или FrameDelayLine.
+                // Поэтому после возврата sendFrame исходный RGB-массив можно
+                // безопасно перезаписать следующим кадром без новой аллокации.
+                val rgbSize = width * height * 3
+                var rgb = rgbBuffer
+                if (rgb == null || rgb.size != rgbSize) {
+                    rgb = ByteArray(rgbSize)
+                    rgbBuffer = rgb
+                    Log.i(TAG, "RGB-буфер MStar выделен: $width x $height, $rgbSize байт")
+                }
                 input.readFully(rgb)
                 if (!running || session != expectedSession) break
                 ColorProcessor.processRgbData(rgb, options)
