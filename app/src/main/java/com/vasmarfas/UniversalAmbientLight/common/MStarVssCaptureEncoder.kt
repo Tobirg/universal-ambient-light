@@ -148,27 +148,25 @@ class MStarVssCaptureEncoder(
     // Выполняется вне главного потока; последовательные вызовы для одного процесса
     // не должны конкурировать друг с другом.
     private fun stopProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) = synchronized(proc) {
-        val pidForLog = pidHolder?.get() ?: -1
-        Log.i(TAG, "Остановка MStar VSS, PID=$pidForLog")
+        val pid = pidHolder?.get() ?: -1
+        Log.i(TAG, "Остановка MStar VSS, PID=$pid")
         requestStop(proc)
         try {
-            // Даём VSS шанс получить команду и корректно вызвать DisconnectEx.
-            proc.waitFor(700, TimeUnit.MILLISECONDS)
-
-            // Нельзя полагаться только на waitFor(su): оболочка su может выйти
-            // раньше дочернего root-процесса. Проверяем его PID отдельно.
-            val pid = pidHolder?.get() ?: -1
-            if (pid > 1) {
-                signalNative(pid, "TERM")
-                proc.waitFor(700, TimeUnit.MILLISECONDS)
-                // Если процесс уже завершился, /proc/PID/exe исчезнет,
-                // поэтому следующий сигнал ничего не затронет.
-                signalNative(pid, "KILL")
-            }
-            if (proc.isAlive) {
-                proc.destroy()
-                if (!proc.waitFor(500, TimeUnit.MILLISECONDS))
-                    proc.destroyForcibly()
+            // Если процесс штатно завершился, не тратим время на дополнительные su
+            // и сигналы. При обычном FPS закрытие stdin обрабатывается сразу.
+            if (!proc.waitFor(250, TimeUnit.MILLISECONDS)) {
+                // У su и нативного сервера могут быть разные жизненные циклы:
+                // сигнал посылаем только PID, сообщённому самим сервером.
+                if (pid > 1) {
+                    signalNative(pid, "TERM")
+                    if (!proc.waitFor(500, TimeUnit.MILLISECONDS)) {
+                        signalNative(pid, "KILL")
+                    }
+                }
+                if (proc.isAlive) {
+                    proc.destroy()
+                    if (!proc.waitFor(250, TimeUnit.MILLISECONDS)) proc.destroyForcibly()
+                }
             }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
