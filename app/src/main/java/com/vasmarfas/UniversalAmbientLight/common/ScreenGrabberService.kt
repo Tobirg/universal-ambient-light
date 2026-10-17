@@ -1708,10 +1708,11 @@ class ScreenGrabberService : Service() {
             }
             mHandler?.post {
                 // Пока закрывался старый вывод, подсветку могли выключить
-                if (mActiveBackend == null || mHyperionThread != null) return@post
-                // Новые настройки проверяются как при старте: при ошибке — тот же текст и остановка
+                if ((mActiveBackend == null && !mLayoutTestOutputOnly) ||
+                    mHyperionThread != null) return@post
+                // При проверке только ленты не требуем работающий видеозахват.
                 mHasConnected = false
-                if (!prepared()) haltStartup()
+                if (!prepared(outputOnly = mLayoutTestOutputOnly)) haltStartup()
             }
         }, "hyperion-restart").apply { isDaemon = true }.start()
     }
@@ -1833,6 +1834,11 @@ class ScreenGrabberService : Service() {
             R.string.pref_key_reconnect_delay,
             R.string.pref_key_adalight_baudrate,
             R.string.pref_key_adalight_protocol,
+            R.string.pref_key_adalight_rgbw_direct,
+            R.string.pref_key_adalight_white_gain,
+            R.string.pref_key_adalight_white_red,
+            R.string.pref_key_adalight_white_green,
+            R.string.pref_key_adalight_white_blue,
             R.string.pref_key_wled_color_order,
             R.string.pref_key_wled_protocol,
             R.string.pref_key_wled_rgbw,
