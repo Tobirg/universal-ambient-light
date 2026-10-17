@@ -130,7 +130,8 @@ class AdalightClient(
     init {
         if (mRgbwDirect) {
             Log.i(TAG, "HyperSerial AWA direct RGBW enabled: AWa, RGBW32, " +
-                "whiteGain=${mWhiteCalibration.whiteGain}, " +
+                "whiteIntensity=${mWhiteCalibration.whiteLedIntensity / 100f}, " +
+                "whiteMixerThreshold=${mWhiteCalibration.whiteMixerThreshold}%, " +
                 "whiteRGB=${mWhiteCalibration.whiteRed}/" +
                 "${mWhiteCalibration.whiteGreen}/${mWhiteCalibration.whiteBlue}")
         }
