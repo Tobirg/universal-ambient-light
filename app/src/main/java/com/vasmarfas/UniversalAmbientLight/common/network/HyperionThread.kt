@@ -417,7 +417,12 @@ class HyperionThread(
 
             OutputType.ADALIGHT -> AdalightClient(
                 mContext, mPriority, mBaudRate, mAdalightProtocol,
-                effectiveSmoothing, mSmoothingPreset, mSettlingTime, effectiveDelayMs, mUpdateFrequency
+                effectiveSmoothing, mSmoothingPreset, mSettlingTime, effectiveDelayMs, mUpdateFrequency,
+                mConfig.adalightRgbwDirect,
+                RgbwCalibration(
+                    mConfig.adalightWhiteGain, mConfig.adalightWhiteRed,
+                    mConfig.adalightWhiteGreen, mConfig.adalightWhiteBlue
+                )
             )
 
             OutputType.HOME_ASSISTANT -> HomeAssistantClient(
