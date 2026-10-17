@@ -47,6 +47,21 @@ class FrameDelayLineTest {
     }
 
     @Test
+    fun `queued frames keep snapshots when producer reuses its RGB buffer`() {
+        val line = FrameDelayLine()
+        val reused = frame(2, 2, 10)
+
+        line.push(reused, 2, 2, dueAt = 100)
+        reused.fill(20.toByte())
+        line.push(reused, 2, 2, dueAt = 200)
+        reused.fill(30.toByte())
+
+        // Приёмник должен видеть старые кадры, а не последние байты источника.
+        assertEquals(10, line.takeDue(100)?.data?.get(0)?.toInt()?.and(0xFF))
+        assertEquals(20, line.takeDue(200)?.data?.get(0)?.toInt()?.and(0xFF))
+    }
+
+    @Test
     fun `clearing drops the queued frames`() {
         val line = FrameDelayLine()
         line.push(frame(2, 2, 10), 2, 2, dueAt = 100)
