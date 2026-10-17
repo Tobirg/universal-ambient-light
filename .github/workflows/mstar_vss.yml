@@ -37,6 +37,7 @@ jobs:
             exit 1
           fi
       - uses: gradle/actions/setup-gradle@v4
+      # RGBW candidate build: compile APK and execute all fullDebug unit tests.
       - name: Assemble and test full debug APK
         run: |
           chmod +x gradlew
