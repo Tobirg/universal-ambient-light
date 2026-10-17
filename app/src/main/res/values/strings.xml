@@ -867,5 +867,5 @@
     <string name="adalight_rgbw_red">White LED red contribution</string>
     <string name="adalight_rgbw_green">White LED green contribution</string>
     <string name="adalight_rgbw_blue">White LED blue contribution</string>
-    <string name="adalight_rgbw_help">0–255 per channel: calibrate the white LED's color. This is a simple RGBW converter, not HyperHDR ICE dithering.</string>
+    <string name="adalight_rgbw_help">0–255 per channel: calibrate the white LED color. This is a simple RGBW converter, not HyperHDR ICE dithering.</string>
 </resources>
