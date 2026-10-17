@@ -359,7 +359,16 @@ class HyperionThread(
                 val client = createClient()
                 if (client != null && client.isConnected()) {
                     if (client is AdalightClient) client.setLayoutTestEnabled(mLayoutTestEnabled)
-                    mClient.set(client)
+                    // USB может открываться несколько секунд. Если в это время
+                    // пользователь выключил автономный тест, клиент нельзя снова
+                    // зарегистрировать после disconnect() — иначе порт останется занят.
+                    installRecoveredClient(client)
+                    if (mClient.get() !== client || mExecutor.isShutdown || isInterrupted) {
+                        if (mClient.compareAndSet(client, null)) {
+                            try { client.disconnect() } catch (_: IOException) { }
+                        }
+                        return
+                    }
                     mConnected.set(true)
                     AnalyticsHelper.logProtocolStarted(mContext, mConnectionType)
                     mCallback.onConnected()
