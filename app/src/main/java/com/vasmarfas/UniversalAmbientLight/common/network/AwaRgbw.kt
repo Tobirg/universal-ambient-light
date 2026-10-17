@@ -75,7 +75,7 @@ class AwaRgbw {
         // HyperHDR parameters: intensity (0.5..5.0), white mixing threshold (0..1).
         // The optional intensity=0 keeps the previous UAL "white off" setting.
         val intensity = c.whiteLedIntensity / 100f
-        val threshold255 = c.whiteMixerThreshold * 2.55f
+        val threshold255 = (c.whiteMixerThreshold / 100f) * 255f
         val invRange = if (255f - threshold255 > 0.00001f)
             1f / (255f - threshold255) else 0f
 
