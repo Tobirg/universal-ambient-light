@@ -68,6 +68,7 @@ class AdalightClient(
     private var mLayoutTestColors: Array<ColorRgb>? = null
 
     /** Адресная проверка ленты без виртуального изображения и без переподключения USB. */
+    @Synchronized
     fun setLayoutTestEnabled(enabled: Boolean) {
         mLayoutTestEnabled = enabled
         if (enabled && isConnected()) updateLayoutTestColors()
@@ -87,8 +88,9 @@ class AdalightClient(
             Log.i(TAG, "Адресная проверка сторон: LED=" + mLayoutTestColors!!.size +
                 " (верх=" + layout.topLed + ", право=" + layout.rightLed +
                 ", низ=" + layout.bottomLed + ", лево=" + layout.leftLed + ")")
+            // Не сбрасываем сглаживание одинаковой целью каждый кадр захвата.
+            mLayoutTestColors?.takeIf { it.isNotEmpty() }?.let { mSmoothing.setTargetColors(it) }
         }
-        mLayoutTestColors?.takeIf { it.isNotEmpty() }?.let { mSmoothing.setTargetColors(it) }
     }
 
     private val mKeepAlive = Executors.newSingleThreadScheduledExecutor { r ->
