@@ -1545,14 +1545,16 @@ class ScreenGrabberService : Service() {
         get() = mActiveBackend?.isCapturing() == true
 
     val isCommunicating: Boolean
-        get() = (isCapturing || mLayoutTestOutputOnly) && mHasConnected
+        get() = isCapturing && mHasConnected
 
     private fun notifyActivity() {
-        // Статус RUNNING подтверждается и готовым источником (или автономным
-        // тестом ленты), и подключённым основным выводом. Для всех остальных
-        // сочетаний во время запуска сообщаем STARTING, а не ложный STOPPED.
+        // RUNNING требует готового источника и подключённого основного вывода.
+        // Для остальных сочетаний при запуске сообщаем STARTING, а не STOPPED.
         val communicating = isCommunicating
-        if (communicating) mStartInProgress = false
+        // Автономный тест ленты не является захватом: завершаем подготовку,
+        // но сохраняем прежнюю семантику статуса RUNNING для основного сервиса.
+        if (communicating || (mLayoutTestOutputOnly && mHasConnected))
+            mStartInProgress = false
         val starting = mStartError == null && mStartInProgress && !communicating
         val intent = Intent(BROADCAST_FILTER)
         intent.putExtra(BROADCAST_TAG, communicating)
