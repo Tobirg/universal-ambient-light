@@ -146,6 +146,9 @@ internal class RemoteHostHandler(
         if (OutputType.of(Preferences(mContext).getString(R.string.pref_key_connection_type)) != OutputType.ADALIGHT)
             throw RemoteCommandException(RemoteProtocol.ERR_FAILED, "Adalight USB is not selected on TV")
         val enabled = request.optBoolean("enabled")
+        val permissionDone = CountDownLatch(1)
+        var permissionPending = false
+        var permissionGranted = false
         onMain {
             if (!enabled) {
                 if (mLayoutTestClient === client) {
@@ -162,19 +165,34 @@ internal class RemoteHostHandler(
                         throw RemoteCommandException(RemoteProtocol.ERR_FAILED, "TV could not start the LED test")
                     }
                 } else {
+                    // Не подтверждаем телефону включение, пока не завершился запрос
+                    // разрешения на самом ТВ. Иначе переключатель включался даже при отказе.
+                    permissionPending = true
                     UsbSerialPermissionHelper.ensurePermissionForSerialDevice(
                         context = mContext, device = null,
                         onReady = {
-                            if (mLayoutTestClient === client && !dispatchLayoutTest(true))
-                                mLayoutTestClient = null
+                            if (mLayoutTestClient === client) {
+                                permissionGranted = dispatchLayoutTest(true)
+                                if (!permissionGranted) mLayoutTestClient = null
+                            }
+                            permissionDone.countDown()
                         },
                         onDenied = {
                             if (mLayoutTestClient === client) mLayoutTestClient = null
+                            permissionDone.countDown()
                         },
                         showToast = true, force = true
                     )
                 }
             }
+        }
+        if (permissionPending) {
+            if (!permissionDone.await(60, TimeUnit.SECONDS)) {
+                onMain { if (mLayoutTestClient === client) mLayoutTestClient = null }
+                throw RemoteCommandException(RemoteProtocol.ERR_FAILED, "USB permission on TV timed out")
+            }
+            if (!permissionGranted)
+                throw RemoteCommandException(RemoteProtocol.ERR_FAILED, "USB permission or LED test start denied on TV")
         }
         return JSONObject()
     }
