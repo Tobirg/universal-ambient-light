@@ -104,6 +104,18 @@
     <string name="pref_key_adalight_protocol" translatable="false">pref_key_adalight_protocol</string>
     <string name="pref_default_adalight_protocol" translatable="false">ada</string>
 
+    <!-- RGBW v11+ only for the direct HyperSerial AWA format. -->
+    <string name="pref_key_adalight_rgbw_direct" translatable="false">pref_key_adalight_rgbw_direct</string>
+    <bool name="pref_default_adalight_rgbw_direct" translatable="false">false</bool>
+    <string name="pref_key_adalight_white_gain" translatable="false">pref_key_adalight_white_gain</string>
+    <integer name="pref_default_adalight_white_gain" translatable="false">255</integer>
+    <string name="pref_key_adalight_white_red" translatable="false">pref_key_adalight_white_red</string>
+    <integer name="pref_default_adalight_white_red" translatable="false">255</integer>
+    <string name="pref_key_adalight_white_green" translatable="false">pref_key_adalight_white_green</string>
+    <integer name="pref_default_adalight_white_green" translatable="false">255</integer>
+    <string name="pref_key_adalight_white_blue" translatable="false">pref_key_adalight_white_blue</string>
+    <integer name="pref_default_adalight_white_blue" translatable="false">255</integer>
+
     <!-- DMX по сети (E1.31, Art-Net) и tpm2.net: первая вселенная и светодиодов в пакете -->
     <string name="pref_key_dmx_universe" translatable="false">pref_key_dmx_universe</string>
     <integer name="pref_default_dmx_universe" translatable="false">1</integer>
