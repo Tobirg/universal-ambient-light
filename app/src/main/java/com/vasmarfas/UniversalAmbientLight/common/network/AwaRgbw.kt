@@ -5,19 +5,31 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.floor
 
-/** Existing UAL controls: whiteGain controls W extraction; whiteRGB describes the W emitter. */
+/**
+ * ICE parameters exposed in UAL:
+ * intensity in hundredths (180 -> 1.80), threshold in percent (0 -> 0.0).
+ * The RGB components describe the relative colour of the physical white emitter.
+ */
 data class RgbwCalibration(
-    val whiteGain: Int = 255,
+    val whiteLedIntensity: Int = 180,
+    val whiteMixerThreshold: Int = 0,
     val whiteRed: Int = 255,
     val whiteGreen: Int = 255,
     val whiteBlue: Int = 255,
 ) {
     fun normalized() = RgbwCalibration(
-        whiteGain.coerceIn(0, 255),
+        whiteLedIntensity.coerceIn(0, 500),
+        whiteMixerThreshold.coerceIn(0, 100),
         whiteRed.coerceIn(0, 255),
         whiteGreen.coerceIn(0, 255),
         whiteBlue.coerceIn(0, 255),
     )
+
+    companion object {
+        /** Preserve the previous AWa mixer settings on upgrade. 0 means W disabled. */
+        fun legacyGainToIntensity(gain: Int): Int =
+            if (gain <= 0) 0 else (180f * 255f / gain).toInt().coerceIn(50, 500)
+    }
 }
 
 /**
@@ -60,9 +72,12 @@ class AwaRgbw {
         val wr = c.whiteRed / 255f
         val wg = c.whiteGreen / 255f
         val wb = c.whiteBlue / 255f
-        // HyperHDR's default white LED intensity is 1.8. An existing gain of
-        // 255 retains that value; a lower gain extracts proportionally less W.
-        val intensity = if (c.whiteGain == 0) 0f else 1.8f * 255f / c.whiteGain
+        // HyperHDR parameters: intensity (0.5..5.0), white mixing threshold (0..1).
+        // The optional intensity=0 keeps the previous UAL "white off" setting.
+        val intensity = c.whiteLedIntensity / 100f
+        val threshold255 = c.whiteMixerThreshold * 2.55f
+        val invRange = if (255f - threshold255 > 0.00001f)
+            1f / (255f - threshold255) else 0f
 
         val packet = ByteArray(6 + leds.size * 4 + 3)
         packet[0] = 'A'.code.toByte()
@@ -104,10 +119,12 @@ class AwaRgbw {
                     val ir = r * 255f + if (dither) state.errorR else 0f
                     val ig = g * 255f + if (dither) state.errorG else 0f
                     val ib = b * 255f + if (dither) state.errorB else 0f
-                    // ICE Soft Mixer, threshold = 0 (HyperHDR default).
                     val common = min(ir * wr, min(ig * wg, ib * wb))
-                    val whiteFactor = (common / 255f).coerceIn(0f, 1f)
-                    val white = if (intensity > 0.00001f) quantize(common * whiteFactor / intensity) else 0
+                    val whiteFactor = if (invRange > 0.00001f)
+                        ((common - threshold255) * invRange).coerceIn(0f, 1f)
+                        else 1f
+                    val white = if (intensity > 0.00001f)
+                        quantize(common * whiteFactor / intensity) else 0
                     val rr = ir - white * intensity * wr
                     val gg = ig - white * intensity * wg
                     val bb = ib - white * intensity * wb
