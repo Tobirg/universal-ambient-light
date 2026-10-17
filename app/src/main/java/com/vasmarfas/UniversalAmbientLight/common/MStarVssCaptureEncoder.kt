@@ -127,28 +127,47 @@ class MStarVssCaptureEncoder(
         } catch (_: IOException) { /* Процесс мог уже завершиться. */ }
     }
 
-    private fun stopProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) {
+    // Сигнал отправляется только тому PID, который сообщил наш нативный сервер.
+    // Проверка /proc/PID/exe защищает от случайного завершения чужого процесса.
+    private fun signalNative(pid: Int, signal: String) {
+        if (pid <= 1) return
+        val command = "exe=\$(readlink /proc/$pid/exe 2>/dev/null); " +
+            "case \"\$exe\" in /data/local/tmp/mstar_vss_server|" +
+            "'/data/local/tmp/mstar_vss_server (deleted)') kill -$signal $pid;; esac"
+        try {
+            val signalProcess = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            if (!signalProcess.waitFor(1000, TimeUnit.MILLISECONDS)) {
+                Log.w(TAG, "Таймаут сигнала $signal для VSS PID=$pid")
+                signalProcess.destroy()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Не удалось отправить $signal для VSS PID=$pid", e)
+        }
+    }
+
+    // Выполняется вне главного потока; последовательные вызовы для одного процесса
+    // не должны конкурировать друг с другом.
+    private fun stopProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) = synchronized(proc) {
         requestStop(proc)
         try {
-            if (proc.waitFor(1500, TimeUnit.MILLISECONDS)) return
-            // Если su оставил дочерний процесс, посылаем сигнал только его PID
-            // после проверки пути исполняемого файла; killall не используется.
+            // Даём VSS шанс получить команду и корректно вызвать DisconnectEx.
+            proc.waitFor(700, TimeUnit.MILLISECONDS)
+
+            // Нельзя полагаться только на waitFor(su): оболочка su может выйти
+            // раньше дочернего root-процесса. Проверяем его PID отдельно.
             val pid = pidHolder?.get() ?: -1
             if (pid > 1) {
-                val killCommand = "exe=\$(readlink /proc/$pid/exe 2>/dev/null); " +
-                    "case \"\$exe\" in /data/local/tmp/mstar_vss_server|" +
-                    "'/data/local/tmp/mstar_vss_server (deleted)') kill -TERM $pid;; esac"
-                try {
-                    val killer = Runtime.getRuntime().exec(arrayOf("su", "-c", killCommand))
-                    killer.waitFor(700, TimeUnit.MILLISECONDS)
-                    killer.destroy()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Не удалось отправить SIGTERM процессу VSS", e)
-                }
-                if (proc.waitFor(700, TimeUnit.MILLISECONDS)) return
+                signalNative(pid, "TERM")
+                proc.waitFor(700, TimeUnit.MILLISECONDS)
+                // Если процесс уже завершился, /proc/PID/exe исчезнет,
+                // поэтому следующий сигнал ничего не затронет.
+                signalNative(pid, "KILL")
             }
-            proc.destroy()
-            if (!proc.waitFor(500, TimeUnit.MILLISECONDS)) proc.destroyForcibly()
+            if (proc.isAlive) {
+                proc.destroy()
+                if (!proc.waitFor(500, TimeUnit.MILLISECONDS))
+                    proc.destroyForcibly()
+            }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             proc.destroy()
@@ -158,9 +177,13 @@ class MStarVssCaptureEncoder(
     }
 
     private fun runCapture(expectedSession: Int) {
+        // Один аппаратный VSS-поток на экземпляр приложения, включая завершение
+        // старой сессии перед стартом следующей.
+        captureLock.lock()
         var ownProcess: java.lang.Process? = null
         var ownPid: AtomicInteger? = null
         try {
+            if (!running || session != expectedSession) return
             val args = params()
             val expectedWidth = args[4].toInt()
             val expectedHeight = args[5].toInt()
@@ -232,18 +255,16 @@ class MStarVssCaptureEncoder(
                 onFatalError?.invoke("MStar hardware capture stopped: ${e.message}")
             }
         } finally {
-            if (session == expectedSession) {
-                ownProcess?.let { stopProcess(it, ownPid) }
-            } else {
-                // При обычной остановке завершение контролирует отдельный поток.
-                ownProcess?.let { requestStop(it) }
-            }
+            // В обоих случаях дожидаемся завершения старой сессии до снятия
+            // блокировки. В stopRecording остановка уже запущена в другом потоке.
+            ownProcess?.let { stopProcess(it, ownPid) }
             if (session == expectedSession) {
                 capturing = false
                 running = false
                 if (process === ownProcess) { process = null; nativePid = null }
                 listener.sendStatus(false)
             }
+            captureLock.unlock()
         }
     }
 
@@ -287,6 +308,7 @@ class MStarVssCaptureEncoder(
     companion object {
         private const val TAG = "MStarVssCapture"
         private const val BINARY = "mstar_vss_server"
+        private val captureLock = java.util.concurrent.locks.ReentrantLock(true)
 
         /** Быстрая проверка прошивки без вызовов su или ioctl с правами root в UI-потоке. */
         fun isAvailable(): Boolean =
