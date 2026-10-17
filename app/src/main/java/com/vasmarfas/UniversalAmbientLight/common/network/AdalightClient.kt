@@ -319,6 +319,9 @@ class AdalightClient(
 
     @Throws(IOException::class)
     override fun clear(priority: Int) {
+        // Во время адресной проверки нельзя подменять её цель чёрным:
+        // изменение сторон не должно оставлять всю ленту погашенной.
+        if (mLayoutTestEnabled) return
         // Отправляем все светодиоды чёрными
         val ledCount = LedDataExtractor.getLedCount(mContext)
         val blackLeds = Array(ledCount) { ColorRgb(0, 0, 0) }
