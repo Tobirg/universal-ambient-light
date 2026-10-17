@@ -54,6 +54,7 @@ class HyperionThread(
     private val mWledColorOrder: String = config.wledColorOrder
     private val mReconnectEnabled = AtomicBoolean(config.reconnect)
     private val mConnected = AtomicBoolean(false)
+    private val mConnectionLossNotified = AtomicBoolean(false)
     @Volatile private var mLayoutTestEnabled = false
     private val mStandbyPaused = AtomicBoolean(false)
     private val mClient = AtomicReference<HyperionClient?>()
@@ -103,6 +104,7 @@ class HyperionThread(
             if (mStandbyPaused.get()) return
             val client = mClient.get()
             if (client == null || !client.isConnected()) {
+                if (client != null) reportConnectionLost("Primary output disconnected")
                 // Клиент умирает молча: у Adalight после standby ТВ хост переоткрывает USB,
                 // ошибка записи гасит isConnected без исключения наружу, и без этой ветки
                 // лента не оживала бы до ручного перезапуска (issue #41). Приходящие кадры
@@ -178,7 +180,7 @@ class HyperionThread(
                         mLastSentFrame = null
                     }
                 } catch (e: IOException) {
-                    mCallback.onConnectionError(e.hashCode(), e.message)
+                    reportConnectionLost(e.message)
                 }
             }
         }
@@ -337,7 +339,11 @@ class HyperionThread(
         mKeepAliveExecutor.scheduleWithFixedDelay({
             if (mStandbyPaused.get()) return@scheduleWithFixedDelay
             val client = mClient.get() ?: return@scheduleWithFixedDelay
-            if (!client.isConnected()) return@scheduleWithFixedDelay
+            if (!client.isConnected()) {
+                reportConnectionLost("Primary output disconnected")
+                scheduleClientRecovery()
+                return@scheduleWithFixedDelay
+            }
             // У WLED и Adalight своя логика keepalive.
             if (client !is HyperionFlatBuffers) return@scheduleWithFixedDelay
 
@@ -371,7 +377,7 @@ class HyperionThread(
                     }
                     mConnected.set(true)
                     AnalyticsHelper.logProtocolStarted(mContext, mConnectionType)
-                    mCallback.onConnected()
+                    reportConnectionRestored()
                     Log.i(TAG, "Connected to $mConnectionType at $mHost:$mPort")
                     return
                 }
@@ -508,8 +514,21 @@ class HyperionThread(
         mConfig.haTurnOffLights
     )
 
+    private fun reportConnectionLost(reason: String?) {
+        if (mConnected.get() && mConnectionLossNotified.compareAndSet(false, true)) {
+            mCallback.onConnectionError(0, reason)
+        }
+    }
+
+    private fun reportConnectionRestored() {
+        if (!mExecutor.isShutdown) {
+            mConnectionLossNotified.set(false)
+            mCallback.onConnected()
+        }
+    }
+
     private fun handleError(e: IOException) {
-        mCallback.onConnectionError(e.hashCode(), e.message)
+        reportConnectionLost(e.message)
 
         // Не пересоздавать клиент во сне: для Adalight новое открытие порта сбрасывает Arduino.
         if (mReconnectEnabled.get() && mConnected.get() && !mStandbyPaused.get()) {
@@ -524,7 +543,7 @@ class HyperionThread(
                     // Восстановление через путь send/keepalive должно подтверждать
                     // соединение так же, как восстановление из потока кадров.
                     if (mClient.get() === newClient && !mExecutor.isShutdown) {
-                        mCallback.onConnected()
+                        reportConnectionRestored()
                     }
                 }
             } catch (ignored: IOException) {
@@ -597,11 +616,11 @@ class HyperionThread(
                         installRecoveredClient(newClient)
                         if (mClient.get() === newClient) {
                             Log.i(TAG, "Recovered $mConnectionType connection")
-                            mCallback.onConnected()
+                            reportConnectionRestored()
                         }
                     }
                 } catch (e: IOException) {
-                    mCallback.onConnectionError(e.hashCode(), e.message)
+                    reportConnectionLost(e.message)
                 }
             } finally {
                 mRecovering.set(false)
