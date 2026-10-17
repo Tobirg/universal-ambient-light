@@ -23,7 +23,7 @@ class AwaRgbwTest {
         assertArrayEquals(byteArrayOf(255.toByte(), 120, 0, 0), saturated.copyOfRange(6, 10))
 
         val noWhite = AwaRgbw().packet(arrayOf(ColorRgb(210, 180, 170)),
-            RgbwCalibration(whiteGain = 0))
+            RgbwCalibration(whiteLedIntensity = 0))
         assertArrayEquals(byteArrayOf(210.toByte(), 180.toByte(), 170.toByte(), 0),
             noWhite.copyOfRange(6, 10))
     }
@@ -31,7 +31,7 @@ class AwaRgbwTest {
     @Test
     fun `ICE white point calibration compensates RGB residuals`() {
         val packet = AwaRgbw().packet(arrayOf(ColorRgb(210, 180, 170)),
-            RgbwCalibration(255, 255, 200, 170))
+            RgbwCalibration(whiteLedIntensity = 180, whiteRed = 255, whiteGreen = 200, whiteBlue = 170))
         assertEquals(160, packet[6].toInt() and 255)
         assertEquals(140, packet[7].toInt() and 255)
         assertEquals(136, packet[8].toInt() and 255)
@@ -60,6 +60,25 @@ class AwaRgbwTest {
         assertEquals(second, packet[packet.size - 2].toInt() and 255)
         assertEquals(if (extra == 0x41) 0xaa else extra,
             packet.last().toInt() and 255)
+    }
+
+    @Test
+    fun `white mixer threshold suppresses white below the selected luminance`() {
+        val leds = arrayOf(ColorRgb(100, 100, 100))
+        val result = AwaRgbw().packet(leds,
+            RgbwCalibration(whiteLedIntensity = 180, whiteMixerThreshold = 50))
+        assertArrayEquals(byteArrayOf(100, 100, 100, 0), result.copyOfRange(6, 10))
+
+        val fullWhite = AwaRgbw().packet(arrayOf(ColorRgb(255, 255, 255)),
+            RgbwCalibration(whiteLedIntensity = 180, whiteMixerThreshold = 100))
+        assertEquals(142, fullWhite[9].toInt() and 255)
+    }
+
+    @Test
+    fun `saved White Gain migrates to ICE intensity without changing its default`() {
+        assertEquals(180, RgbwCalibration.legacyGainToIntensity(255))
+        assertEquals(0, RgbwCalibration.legacyGainToIntensity(0))
+        assertEquals(358, RgbwCalibration.legacyGainToIntensity(128))
     }
 
     @Test
