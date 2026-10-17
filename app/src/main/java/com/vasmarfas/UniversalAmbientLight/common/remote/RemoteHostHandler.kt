@@ -187,7 +187,7 @@ internal class RemoteHostHandler(
             }
         }
         if (permissionPending) {
-            if (!permissionDone.await(60, TimeUnit.SECONDS)) {
+            if (!permissionDone.await(45, TimeUnit.SECONDS)) {
                 onMain { if (mLayoutTestClient === client) mLayoutTestClient = null }
                 throw RemoteCommandException(RemoteProtocol.ERR_FAILED, "USB permission on TV timed out")
             }
