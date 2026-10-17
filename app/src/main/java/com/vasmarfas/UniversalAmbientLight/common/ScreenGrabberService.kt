@@ -82,6 +82,8 @@ class ScreenGrabberService : Service() {
     private var mHasConnected = false
     private var mMediaProjectionManager: MediaProjectionManager? = null
     private var mHyperionThread: HyperionThread? = null
+    private var mLayoutTestEnabled = false
+    private var mLayoutTestOutputOnly = false
 
     // Дополнительный вывод на Home Assistant — работает параллельно с основным
     // подключением (например, основной вывод на WLED, а сбоку ещё лампы HA)
@@ -368,16 +370,19 @@ class ScreenGrabberService : Service() {
         super.onCreate()
     }
 
-    private fun prepared(): Boolean {
+    private fun prepared(outputOnly: Boolean = false): Boolean {
         AnalyticsHelper.syncCrashlyticsContext(baseContext)
         val prefs = Preferences(baseContext)
         mConnectionType =
             prefs.getString(R.string.pref_key_connection_type, "hyperion") ?: "hyperion"
 
-        validateSettings(baseContext)?.let { error ->
-            mStartError = error.message
-            AnalyticsHelper.logServiceError(baseContext, error.code, error.details)
-            return false
+        // Адресный тест USB не должен требовать работающий видеозахват.
+        if (!outputOnly) {
+            validateSettings(baseContext)?.let { error ->
+                mStartError = error.message
+                AnalyticsHelper.logServiceError(baseContext, error.code, error.details)
+                return false
+            }
         }
 
         val host = prefs.getString(R.string.pref_key_host, null)?.trim()
@@ -456,7 +461,7 @@ class ScreenGrabberService : Service() {
         mMediaProjectionManager =
             getSystemService(MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
         val method = prefs.getString(R.string.pref_key_capture_method, "media_projection")
-        if (mMediaProjectionManager == null && method == "media_projection") {
+        if (!outputOnly && mMediaProjectionManager == null && method == "media_projection") {
             mStartError = resources.getString(R.string.error_media_projection_denied)
             AnalyticsHelper.logServiceError(baseContext, "media_projection_manager_null", null)
             return false
@@ -513,6 +518,7 @@ class ScreenGrabberService : Service() {
                 ?.ifEmpty { null } ?: Zigbee2MqttClient.DEFAULT_BASE_TOPIC
         )
         val thread = HyperionThread(mReceiver, baseContext, config)
+        if (mLayoutTestEnabled) thread.setLayoutTestEnabled(true)
         if (mCalibrating) thread.setCalibrating(true)
         mHyperionThread = thread
         thread.start()
@@ -752,6 +758,46 @@ class ScreenGrabberService : Service() {
                 }
 
                 ACTION_STOP -> stopAllCapture()
+                ACTION_LAYOUT_TEST -> {
+                    val enabled = intent.getBooleanExtra(EXTRA_LAYOUT_TEST_ENABLED, false)
+                    if (enabled) {
+                        if (mHyperionThread == null) {
+                            // При выключенном захвате открываем только USB-подключение.
+                            // Ни MediaProjection, ни VSS, ни новый энкодер не запускаются.
+                            val outputType = Preferences(this).getString(
+                                R.string.pref_key_connection_type, "hyperion"
+                            )
+                            if (OutputType.of(outputType) != OutputType.ADALIGHT) {
+                                Log.w(TAG, "LED layout test requires Adalight USB")
+                                stopSelf()
+                            } else {
+                                mLayoutTestEnabled = true
+                                mLayoutTestOutputOnly = true
+                                mCaptureSource = "layout_test"
+                                if (!prepared(outputOnly = true)) {
+                                    mLayoutTestEnabled = false
+                                    mLayoutTestOutputOnly = false
+                                    haltStartup()
+                                }
+                            }
+                        } else {
+                            mLayoutTestEnabled = true
+                            mHyperionThread?.setLayoutTestEnabled(true)
+                        }
+                    } else {
+                        mLayoutTestEnabled = false
+                        mHyperionThread?.setLayoutTestEnabled(false)
+                        if (mLayoutTestOutputOnly) {
+                            // Тест был единственной причиной работы сервиса:
+                            // освобождаем USB и выключаем ленту при выходе со страницы.
+                            mLayoutTestOutputOnly = false
+                            stopAllCapture()
+                            stopSelf()
+                        } else if (mHyperionThread == null) {
+                            stopSelf()
+                        }
+                    }
+                }
                 ACTION_CLEAR -> {
                     // Один чёрный кадр, но соединение оставляем
                     val backend = mActiveBackend
@@ -1422,6 +1468,8 @@ class ScreenGrabberService : Service() {
     private fun stopAllCapture() {
         if (DEBUG) Log.v(TAG, "Stopping all capture")
         mReconnectEnabled = false
+        mLayoutTestEnabled = false
+        mLayoutTestOutputOnly = false
         stopAppWatch()
         mNotificationManager?.cancel(NOTIFICATION_ID)
 
@@ -1643,10 +1691,11 @@ class ScreenGrabberService : Service() {
             }
             mHandler?.post {
                 // Пока закрывался старый вывод, подсветку могли выключить
-                if (mActiveBackend == null || mHyperionThread != null) return@post
+                if ((mActiveBackend == null && !mLayoutTestOutputOnly) ||
+                    mHyperionThread != null) return@post
                 // Новые настройки проверяются как при старте: при ошибке — тот же текст и остановка
                 mHasConnected = false
-                if (!prepared()) haltStartup()
+                if (!prepared(outputOnly = mLayoutTestOutputOnly)) haltStartup()
             }
         }, "hyperion-restart").apply { isDaemon = true }.start()
     }
@@ -1733,6 +1782,8 @@ class ScreenGrabberService : Service() {
         const val ACTION_START_EFFECT = BASE + "ACTION_START_EFFECT"
         const val ACTION_STOP = BASE + "ACTION_STOP"
         const val ACTION_CLEAR = BASE + "ACTION_CLEAR"
+        const val ACTION_LAYOUT_TEST = BASE + "ACTION_LAYOUT_TEST"
+        const val EXTRA_LAYOUT_TEST_ENABLED = BASE + "EXTRA_LAYOUT_TEST_ENABLED"
         const val ACTION_DETECT_FRAME = BASE + "ACTION_DETECT_FRAME"
         const val ACTION_SLEEP_TIMER = BASE + "ACTION_SLEEP_TIMER"
         const val EXTRA_SLEEP_MINUTES = BASE + "EXTRA_SLEEP_MINUTES"

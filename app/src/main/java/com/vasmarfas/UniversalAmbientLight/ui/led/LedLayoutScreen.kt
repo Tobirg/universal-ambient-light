@@ -1,6 +1,8 @@
 package com.vasmarfas.UniversalAmbientLight.ui.led
 
 import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,9 +21,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,10 +40,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.vasmarfas.UniversalAmbientLight.common.ScreenGrabberService
+import com.vasmarfas.UniversalAmbientLight.common.network.OutputType
 import com.vasmarfas.UniversalAmbientLight.common.util.AnalyticsHelper
 import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
+import com.vasmarfas.UniversalAmbientLight.common.util.UsbSerialPermissionHelper
 import com.vasmarfas.UniversalAmbientLight.R
 import com.vasmarfas.UniversalAmbientLight.ui.remote.LocalRemote
+import com.vasmarfas.UniversalAmbientLight.common.remote.RemoteProtocol
+import com.vasmarfas.UniversalAmbientLight.common.remote.RemoteSession
 import com.vasmarfas.UniversalAmbientLight.ui.remote.rememberSettingsPreferences
 
 internal const val MAX_LEDS_VISUALIZATION = 5000
@@ -55,6 +63,64 @@ fun LedLayoutScreen(
     val configuration = LocalConfiguration.current
     // В режиме пульта раскладка правится у телевизора — через зеркало его настроек
     val prefs = rememberSettingsPreferences()
+    val remote = LocalRemote.current
+    val supportsLayoutTest =
+        OutputType.of(prefs.getString(R.string.pref_key_connection_type)) == OutputType.ADALIGHT &&
+        (remote == null || (remote.connection == RemoteSession.Connection.CONNECTED &&
+            remote.caps?.features?.contains(RemoteProtocol.FEATURE_LAYOUT_TEST) == true))
+    var layoutTestEnabled by remember { mutableStateOf(false) }
+    var layoutTestPending by remember { mutableStateOf(false) }
+    val onLayoutTestChange: (Boolean) -> Unit = { enabled ->
+        if (!enabled) {
+            layoutTestPending = false
+            layoutTestEnabled = false
+            if (remote != null) RemoteSession.setRemoteLayoutTest(false)
+            else sendLayoutTest(context, false)
+        } else if (!layoutTestEnabled && !layoutTestPending) {
+            // Сервис не может показать системный USB-диалог сам: он открывает порт
+            // уже после получения разрешения. Запрашиваем его в контексте экрана,
+            // включая первый запуск ленты без единого запуска видеозахвата.
+            layoutTestPending = true
+            if (remote != null) {
+                // У телефона не запрашиваем USB: провод и контроллер подключены к ТВ.
+                RemoteSession.setRemoteLayoutTest(true) { success, error ->
+                    if (layoutTestPending) {
+                        layoutTestPending = false
+                        layoutTestEnabled = success
+                        if (!success) Toast.makeText(context, error ?: context.getString(R.string.remote_error_offline), Toast.LENGTH_LONG).show()
+                    }
+                }
+            } else UsbSerialPermissionHelper.ensurePermissionForSerialDevice(
+                context = context,
+                device = null,
+                onReady = {
+                    // Запрос мог завершиться уже после выхода со страницы.
+                    if (layoutTestPending) {
+                        layoutTestPending = false
+                        layoutTestEnabled = true
+                        sendLayoutTest(context, true)
+                    }
+                },
+                onDenied = {
+                    layoutTestPending = false
+                    layoutTestEnabled = false
+                },
+                // Ручной повтор после отказа должен повторно показать системный диалог.
+                force = true,
+            )
+        }
+    }
+    // При закрытии экрана отменяем ожидающий запуск и возвращаем обычный вывод.
+    DisposableEffect(context, remote?.tv?.id) {
+        onDispose {
+            val wasActive = layoutTestPending || layoutTestEnabled
+            layoutTestPending = false
+            layoutTestEnabled = false
+            if (remote != null) {
+                if (wasActive) RemoteSession.setRemoteLayoutTest(false)
+            } else sendLayoutTest(context, false)
+        }
+    }
 
     val legacyX = prefs.getInt(R.string.pref_key_x_led)
     val legacyY = prefs.getInt(R.string.pref_key_y_led)
@@ -266,6 +332,10 @@ fun LedLayoutScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    LayoutTestToggle(layoutTestEnabled, supportsLayoutTest && !layoutTestPending, onLayoutTestChange)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     LedVisualization(
                         topLed = topLed,
                         rightLed = rightLed,
@@ -284,6 +354,7 @@ fun LedLayoutScreen(
                         captureMarginLeft = captureMarginLeft.coerceIn(0, 40),
                         ledOffset = ledOffset,
                         scanDepth = scanDepth.coerceIn(1, 50),
+                        layoutTestEnabled = layoutTestEnabled,
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
@@ -352,7 +423,7 @@ fun LedLayoutScreen(
                             newText.toIntOrNull()?.let { value ->
                                 if (value >= 0) {
                                     prefs.putInt(R.string.pref_key_bottom_gap, value)
-                                    sendClearOnce(context)
+                                    if (!layoutTestEnabled) sendClearOnce(context)
                                 }
                             }
                         },
@@ -403,25 +474,25 @@ fun LedLayoutScreen(
                         onSideTopChange = { mode ->
                             sideTop = mode
                             prefs.putString(R.string.pref_key_led_side_top, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideRight = sideRight,
                         onSideRightChange = { mode ->
                             sideRight = mode
                             prefs.putString(R.string.pref_key_led_side_right, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideBottom = sideBottom,
                         onSideBottomChange = { mode ->
                             sideBottom = mode
                             prefs.putString(R.string.pref_key_led_side_bottom, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideLeft = sideLeft,
                         onSideLeftChange = { mode ->
                             sideLeft = mode
                             prefs.putString(R.string.pref_key_led_side_left, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         startCorner = startCorner,
                         onStartCornerChange = { newCorner ->
@@ -477,6 +548,10 @@ fun LedLayoutScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
+                    LayoutTestToggle(layoutTestEnabled, supportsLayoutTest && !layoutTestPending, onLayoutTestChange)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     LedVisualization(
                         topLed = topLed,
                         rightLed = rightLed,
@@ -495,6 +570,7 @@ fun LedLayoutScreen(
                         captureMarginLeft = captureMarginLeft.coerceIn(0, 40),
                         ledOffset = ledOffset,
                         scanDepth = scanDepth.coerceIn(1, 50),
+                        layoutTestEnabled = layoutTestEnabled,
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
@@ -565,7 +641,7 @@ fun LedLayoutScreen(
                             newText.toIntOrNull()?.let { value ->
                                 if (value >= 0) {
                                     prefs.putInt(R.string.pref_key_bottom_gap, value)
-                                    sendClearOnce(context)
+                                    if (!layoutTestEnabled) sendClearOnce(context)
                                 }
                             }
                         },
@@ -616,25 +692,25 @@ fun LedLayoutScreen(
                         onSideTopChange = { mode ->
                             sideTop = mode
                             prefs.putString(R.string.pref_key_led_side_top, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideRight = sideRight,
                         onSideRightChange = { mode ->
                             sideRight = mode
                             prefs.putString(R.string.pref_key_led_side_right, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideBottom = sideBottom,
                         onSideBottomChange = { mode ->
                             sideBottom = mode
                             prefs.putString(R.string.pref_key_led_side_bottom, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         sideLeft = sideLeft,
                         onSideLeftChange = { mode ->
                             sideLeft = mode
                             prefs.putString(R.string.pref_key_led_side_left, mode)
-                            sendClearOnce(context)
+                            if (!layoutTestEnabled) sendClearOnce(context)
                         },
                         startCorner = startCorner,
                         onStartCornerChange = { newCorner ->
@@ -651,6 +727,40 @@ fun LedLayoutScreen(
             }
         }
     }
+}
+
+@Composable
+private fun LayoutTestToggle(
+    checked: Boolean,
+    available: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = stringResource(R.string.led_layout_direct_test),
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Switch(
+            checked = checked,
+            enabled = available,
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
+
+private fun sendLayoutTest(context: Context, enabled: Boolean) {
+    // Включение теста может самостоятельно открыть USB-вывод без активного захвата.
+    // Выключение не должно создавать пустой сервис, если его уже нет.
+    if (!enabled && !ScreenGrabberService.sInstanceRunning) return
+    context.startService(android.content.Intent(context, ScreenGrabberService::class.java).apply {
+        action = ScreenGrabberService.ACTION_LAYOUT_TEST
+        putExtra(ScreenGrabberService.EXTRA_LAYOUT_TEST_ENABLED, enabled)
+    })
 }
 
 /**

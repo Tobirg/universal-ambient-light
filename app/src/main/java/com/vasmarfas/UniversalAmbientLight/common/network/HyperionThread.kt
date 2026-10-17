@@ -54,6 +54,7 @@ class HyperionThread(
     private val mWledColorOrder: String = config.wledColorOrder
     private val mReconnectEnabled = AtomicBoolean(config.reconnect)
     private val mConnected = AtomicBoolean(false)
+    @Volatile private var mLayoutTestEnabled = false
     private val mStandbyPaused = AtomicBoolean(false)
     private val mClient = AtomicReference<HyperionClient?>()
     private val mExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "$TAG-send") }
@@ -277,6 +278,12 @@ class HyperionThread(
         }
     }
 
+    /** Передаёт проверочную раскладку в текущий USB-клиент без остановки захвата. */
+    fun setLayoutTestEnabled(enabled: Boolean) {
+        mLayoutTestEnabled = enabled
+        (mClient.get() as? AdalightClient)?.setLayoutTestEnabled(enabled)
+    }
+
     fun setOutputDelay(ms: Long) {
         mOutputDelayMs = ms.coerceIn(0L, 1000L)
         applyTiming()
@@ -351,6 +358,7 @@ class HyperionThread(
             try {
                 val client = createClient()
                 if (client != null && client.isConnected()) {
+                    if (client is AdalightClient) client.setLayoutTestEnabled(mLayoutTestEnabled)
                     mClient.set(client)
                     mConnected.set(true)
                     AnalyticsHelper.logProtocolStarted(mContext, mConnectionType)
@@ -516,6 +524,7 @@ class HyperionThread(
             }
             return
         }
+        if (newClient is AdalightClient) newClient.setLayoutTestEnabled(mLayoutTestEnabled)
         val old = mClient.getAndSet(newClient)
         if (old != null && old !== newClient) {
             // Сокет прежнего клиента иначе остаётся открытым до конца процесса

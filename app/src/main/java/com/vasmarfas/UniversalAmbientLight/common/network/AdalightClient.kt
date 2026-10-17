@@ -5,6 +5,9 @@ import android.hardware.usb.UsbManager
 import android.util.Log
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.vasmarfas.UniversalAmbientLight.common.util.LedDataExtractor
+import com.vasmarfas.UniversalAmbientLight.common.util.LedLayout
+import com.vasmarfas.UniversalAmbientLight.common.util.LedLayoutTestPattern
+import com.vasmarfas.UniversalAmbientLight.common.util.Preferences
 import com.vasmarfas.UniversalAmbientLight.common.util.UsbSerialProberFactory
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -59,6 +62,41 @@ class AdalightClient(
 
     private val mSmoothing: ColorSmoothing
     private var mLedDataBuffer: Array<ColorRgb>? = null
+
+    @Volatile private var mLayoutTestEnabled = false
+    private var mLayoutTestSnapshot: LedLayout? = null
+    private var mLayoutTestColors: Array<ColorRgb>? = null
+
+    /** Адресная проверка ленты без виртуального изображения и без переподключения USB. */
+    @Synchronized
+    fun setLayoutTestEnabled(enabled: Boolean) {
+        mLayoutTestEnabled = enabled
+        if (enabled && isConnected()) updateLayoutTestColors()
+        if (!enabled) {
+            mLayoutTestSnapshot = null
+            mLayoutTestColors = null
+        }
+    }
+
+    @Synchronized
+    private fun updateLayoutTestColors() {
+        if (!mLayoutTestEnabled) return
+        val layout = LedLayout.from(Preferences(mContext))
+        if (layout != mLayoutTestSnapshot || mLayoutTestColors == null) {
+            mLayoutTestColors = LedLayoutTestPattern.build(layout)
+            mLayoutTestSnapshot = layout
+            Log.i(TAG, "LED layout test: count=" + (mLayoutTestColors?.size ?: 0) +
+                " (top=" + layout.topLed + ", right=" + layout.rightLed +
+                ", bottom=" + layout.bottomLed + ", left=" + layout.leftLed + ")")
+            // В режиме без захвата новых видеокадров не бывает. Отправляем
+            // адресный кадр напрямую при изменении раскладки, не полагаясь на
+            // видеоэнкодер, сглаживание или его периодические вызовы setImage().
+            mLayoutTestColors?.takeIf { it.isNotEmpty() }?.let { colors ->
+                mSmoothing.setTargetColors(colors)
+                sendLedData(colors)
+            }
+        }
+    }
 
     private val mKeepAlive = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "AdalightClient-keepalive").apply { isDaemon = true }
@@ -180,6 +218,7 @@ class AdalightClient(
             mConnected = true
             mSmoothing.start()
             mKeepAlive.scheduleWithFixedDelay({
+                if (mLayoutTestEnabled) updateLayoutTestColors()
                 val last = mLastLeds ?: return@scheduleWithFixedDelay
                 if (mPaused || !isConnected()) return@scheduleWithFixedDelay
                 if (System.currentTimeMillis() - mLastSendMs < KEEPALIVE_MS) return@scheduleWithFixedDelay
@@ -286,6 +325,7 @@ class AdalightClient(
 
     @Throws(IOException::class)
     override fun clear(priority: Int) {
+        if (mLayoutTestEnabled) return
         // Отправляем все светодиоды чёрными
         val ledCount = LedDataExtractor.getLedCount(mContext)
         val blackLeds = Array(ledCount) { ColorRgb(0, 0, 0) }
@@ -330,6 +370,11 @@ class AdalightClient(
     ) {
         if (!isConnected()) {
             throw IOException("Not connected to Adalight device")
+        }
+
+        if (mLayoutTestEnabled) {
+            updateLayoutTestColors()
+            return
         }
 
         val leds = LedDataExtractor.extractLEDData(mContext, data, width, height, mLedDataBuffer)
