@@ -497,7 +497,7 @@ fun LedLayoutScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    LayoutTestToggle(layoutTestEnabled, onLayoutTestChange)
+                    LayoutTestToggle(layoutTestEnabled, supportsLayoutTest, onLayoutTestChange)
 
                     Spacer(modifier = Modifier.height(12.dp))
 
