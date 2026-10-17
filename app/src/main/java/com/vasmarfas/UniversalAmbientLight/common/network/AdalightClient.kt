@@ -95,8 +95,13 @@ class AdalightClient(
             Log.i(TAG, "Адресная проверка сторон: LED=" + mLayoutTestColors!!.size +
                 " (верх=" + layout.topLed + ", право=" + layout.rightLed +
                 ", низ=" + layout.bottomLed + ", лево=" + layout.leftLed + ")")
-            // Не сбрасываем сглаживание одинаковой целью каждый кадр захвата.
-            mLayoutTestColors?.takeIf { it.isNotEmpty() }?.let { mSmoothing.setTargetColors(it) }
+            // В режиме без захвата новых видеокадров не бывает. Отправляем
+            // адресный кадр напрямую при изменении раскладки, не полагаясь на
+            // видеоэнкодер, сглаживание или его периодические вызовы setImage().
+            mLayoutTestColors?.takeIf { it.isNotEmpty() }?.let { colors ->
+                mSmoothing.setTargetColors(colors)
+                sendLedData(colors)
+            }
         }
     }
 
@@ -226,11 +231,14 @@ class AdalightClient(
             mConnected = true
             mSmoothing.start()
             mKeepAlive.scheduleWithFixedDelay({
-                val last = mLastLeds ?: return@scheduleWithFixedDelay
                 if (mPaused || !isConnected()) return@scheduleWithFixedDelay
+                // У автономной проверки нет потока видеокадров, поэтому
+                // сами подхватываем изменения настроек с интервалом 0,5 с.
+                if (mLayoutTestEnabled) updateLayoutTestColors()
+                val last = mLastLeds ?: return@scheduleWithFixedDelay
                 if (System.currentTimeMillis() - mLastSendMs < KEEPALIVE_MS) return@scheduleWithFixedDelay
                 sendLedData(Array(last.size) { last[it].clone() })
-            }, KEEPALIVE_MS, KEEPALIVE_MS / 2, TimeUnit.MILLISECONDS)
+            }, KEEPALIVE_MS / 2, KEEPALIVE_MS / 2, TimeUnit.MILLISECONDS)
             Log.i(
                 TAG, "Successfully connected to Adalight device at " + mBaudRate + " baud (VID=" +
                         device.vendorId + " PID=" + device.productId + ")"
