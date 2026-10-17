@@ -23,7 +23,8 @@ data class ConnectionConfig(
     val adalightProtocol: String = "ada",
     // Только HyperSerial AWA v11+ и SK6812 RGBW. Старые протоколы остаются RGB24.
     val adalightRgbwDirect: Boolean = false,
-    val adalightWhiteGain: Int = 255,
+    val adalightIceWhiteIntensity: Int = 180,
+    val adalightIceWhiteMixerThreshold: Int = 0,
     val adalightWhiteRed: Int = 255,
     val adalightWhiteGreen: Int = 255,
     val adalightWhiteBlue: Int = 255,
