@@ -13,7 +13,9 @@ import java.io.DataInputStream
 import java.io.EOFException
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -35,6 +37,13 @@ class MStarVssCaptureEncoder(
     @Volatile private var capturing = false
     @Volatile private var process: java.lang.Process? = null
     @Volatile private var nativePid: AtomicInteger? = null
+    @Volatile private var processStop: StopTicket? = null
+
+    // Одна реальная очистка на экземпляр процесса; остальные вызывающие ждут её завершения.
+    private class StopTicket {
+        val started = AtomicBoolean(false)
+        val finished = CountDownLatch(1)
+    }
     private var worker: HandlerThread? = null
     private var handler: Handler? = null
     @Volatile private var session = 0
@@ -165,8 +174,27 @@ class MStarVssCaptureEncoder(
         }
     }
 
-    // Завершение выполняется на рабочем потоке и не блокирует главный поток Android.
-    private fun stopProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) = synchronized(proc) {
+    // Не запускаем вторую очистку из finally: она дожидается первой, прежде чем
+    // освобождать captureLock и разрешать новую аппаратную сессию.
+    private fun stopProcess(proc: java.lang.Process, pidHolder: AtomicInteger?, stop: StopTicket) {
+        if (!stop.started.compareAndSet(false, true)) {
+            try {
+                stop.finished.await()
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                Log.w(TAG, "Ожидание завершения очистки VSS прервано", e)
+            }
+            return
+        }
+        try {
+            finishProcess(proc, pidHolder)
+        } finally {
+            stop.finished.countDown()
+        }
+    }
+
+    // Полная остановка выполняется единственный раз, вне главного потока Android.
+    private fun finishProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) {
         requestStop(proc)
         try {
             // Сначала ждём штатного закрытия канала. Даже если su уже завершился,
@@ -191,6 +219,7 @@ class MStarVssCaptureEncoder(
         captureLock.lock()
         var ownProcess: java.lang.Process? = null
         var ownPid: AtomicInteger? = null
+        var ownStop: StopTicket? = null
         try {
             if (!running || session != expectedSession) return
             val args = params()
@@ -211,6 +240,8 @@ class MStarVssCaptureEncoder(
             ownProcess = proc
             val pidHolder = AtomicInteger(-1)
             ownPid = pidHolder
+            val stop = StopTicket()
+            ownStop = stop
             Thread({
                 try {
                     proc.errorStream.bufferedReader().forEachLine { line ->
@@ -232,11 +263,12 @@ class MStarVssCaptureEncoder(
                 else {
                     process = proc
                     nativePid = pidHolder
+                    processStop = stop
                     true
                 }
             }
             if (!registered) {
-                stopProcess(proc, pidHolder)
+                // finally сам выполнит остановку; отдельный вызов дал бы дубль.
                 return
             }
 
@@ -277,13 +309,13 @@ class MStarVssCaptureEncoder(
                 onFatalError?.invoke("MStar hardware capture stopped: ${e.message}")
             }
         } finally {
-            // В обоих случаях дожидаемся завершения старой сессии до снятия
-            // блокировки. В stopRecording остановка уже запущена в другом потоке.
-            ownProcess?.let { stopProcess(it, ownPid) }
+            // Дожидаемся единственной очистки, включая асинхронную из stopRecording.
+            val ticket = ownStop
+            if (ticket != null) ownProcess?.let { stopProcess(it, ownPid, ticket) }
             if (session == expectedSession) {
                 capturing = false
                 running = false
-                if (process === ownProcess) { process = null; nativePid = null }
+                if (process === ownProcess) { process = null; nativePid = null; processStop = null }
                 listener.sendStatus(false)
             }
             captureLock.unlock()
@@ -310,10 +342,12 @@ class MStarVssCaptureEncoder(
         capturing = false
         val oldProcess = process
         val oldPid = nativePid
+        val oldStop = processStop
         process = null
         nativePid = null
-        if (oldProcess != null) {
-            Thread({ stopProcess(oldProcess, oldPid) }, "MStar-stop").apply {
+        processStop = null
+        if (oldProcess != null && oldStop != null) {
+            Thread({ stopProcess(oldProcess, oldPid, oldStop) }, "MStar-stop").apply {
                 isDaemon = true
             }.start()
         }
