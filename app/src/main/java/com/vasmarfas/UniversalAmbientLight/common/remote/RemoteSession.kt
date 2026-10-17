@@ -285,7 +285,8 @@ object RemoteSession {
         mSender.execute {
             val result = try {
                 if (enabled) flushPending()
-                call(RemoteProtocol.OP_LAYOUT_TEST, JSONObject().put("enabled", enabled))
+                call(RemoteProtocol.OP_LAYOUT_TEST, JSONObject().put("enabled", enabled),
+                    RemoteClient.LONG_TIMEOUT_MS)
                 Pair(true, null)
             } catch (e: Exception) {
                 Pair(false, e.message ?: "TV is not connected")
