@@ -25,6 +25,8 @@ class AdalightClient(
     settlingTime: Int = 200,
     outputDelayMs: Long = 80L,
     updateFrequency: Int = 25,
+    rgbwDirect: Boolean = false,
+    whiteCalibration: RgbwCalibration = RgbwCalibration(),
 ) : HyperionClient, StreamingClient {
 
     enum class ProtocolType {
@@ -51,6 +53,11 @@ class AdalightClient(
         "sp616e" -> ProtocolType.SP616E
         else -> ProtocolType.ADA
     }
+
+    // Четыре байта отправляем только для AWA и после явного выбора SK6812 v11+.
+    // Остальные протоколы всегда получают прежние трёхканальные пакеты.
+    private val mRgbwDirect = rgbwDirect && mProtocol == ProtocolType.AWA
+    private val mWhiteCalibration = whiteCalibration.normalized()
 
     private var mPort: UsbSerialPort? = null
 
@@ -394,7 +401,8 @@ class AdalightClient(
         }
 
         try {
-            val packet = createPacket(mProtocol, leds)
+            val packet = if (mRgbwDirect) AwaRgbw.packet(leds, mWhiteCalibration)
+                else createPacket(mProtocol, leds)
             maybeAutoThrottle(packet.size, leds.size)
             mLastLeds = leds
             mLastSendMs = System.currentTimeMillis()
