@@ -863,9 +863,10 @@
   <string name="led_layout_direct_test">Direct LED side test</string>
     <string name="adalight_rgbw_direct_title">Direct RGBW (SK6812 / HyperSerial v11+)</string>
     <string name="adalight_rgbw_direct_help">Only for the AWA protocol and SK6812 RGBW firmware v11 or later. Uses 4-byte AWa packets. Keep off for regular RGB strips or older firmware.</string>
-    <string name="adalight_rgbw_gain">White channel strength</string>
+    <string name="adalight_rgbw_intensity">White LED intensity (ICE)</string>
+    <string name="adalight_rgbw_threshold">White mixing threshold (ICE)</string>
     <string name="adalight_rgbw_red">White LED red contribution</string>
     <string name="adalight_rgbw_green">White LED green contribution</string>
     <string name="adalight_rgbw_blue">White LED blue contribution</string>
-    <string name="adalight_rgbw_help">0–255 per channel: calibrate the white LED color. This is a simple RGBW converter, not HyperHDR ICE dithering.</string>
+    <string name="adalight_rgbw_help">HyperHDR ICE RGBW: threshold 0–100% controls when white is mixed; intensity 1.80 is the default (higher means a brighter white emitter and fewer W counts). Intensity 0 disables W. White RGB components 0–255 calibrate the emitter tint. Other protocols remain RGB.</string>
 </resources>
