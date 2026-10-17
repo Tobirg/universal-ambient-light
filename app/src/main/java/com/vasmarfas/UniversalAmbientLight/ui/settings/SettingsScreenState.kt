@@ -34,6 +34,14 @@ class SettingsScreenState(prefs: Preferences) {
         prefs.getString(R.string.pref_key_wled_protocol) ?: "udp_raw"
     )
 
+    var adalightProtocol by mutableStateOf(
+        prefs.getString(R.string.pref_key_adalight_protocol) ?: "ada"
+    )
+
+    var adalightRgbwDirect by mutableStateOf(
+        prefs.getBoolean(R.string.pref_key_adalight_rgbw_direct, false)
+    )
+
     var smoothingPreset by mutableStateOf(
         prefs.getString(R.string.pref_key_smoothing_preset) ?: "off"
     )
