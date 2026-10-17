@@ -148,6 +148,8 @@ class MStarVssCaptureEncoder(
     // Выполняется вне главного потока; последовательные вызовы для одного процесса
     // не должны конкурировать друг с другом.
     private fun stopProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) = synchronized(proc) {
+        val pidForLog = pidHolder?.get() ?: -1
+        Log.i(TAG, "Остановка MStar VSS, PID=$pidForLog")
         requestStop(proc)
         try {
             // Даём VSS шанс получить команду и корректно вызвать DisconnectEx.
@@ -207,7 +209,10 @@ class MStarVssCaptureEncoder(
                     proc.errorStream.bufferedReader().forEachLine { line ->
                         if (line.startsWith("MSTAR_PID=")) {
                             line.removePrefix("MSTAR_PID=").toIntOrNull()?.let { pid ->
-                                if (pid > 1) pidHolder.set(pid)
+                                if (pid > 1) {
+                                    pidHolder.set(pid)
+                                    Log.i(TAG, "MStar VSS native PID=$pid")
+                                }
                             }
                         } else if (line.isNotBlank()) Log.w(TAG, "[VSS] $line")
                     }
