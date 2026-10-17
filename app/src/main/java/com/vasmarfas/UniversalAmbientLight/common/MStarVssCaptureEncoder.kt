@@ -277,6 +277,9 @@ class MStarVssCaptureEncoder(
         ((buffer[offset + 2].toInt() and 255) shl 16) or
         ((buffer[offset + 3].toInt() and 255) shl 24)
 
+    /** Захват запускается, но первый кадр ещё не получен. */
+    fun isStarting(): Boolean = running && !capturing
+
     override fun isCapturing(): Boolean = capturing
     override fun sendStatus() = listener.sendStatus(capturing)
     override fun clearLights() = listener.clear()
