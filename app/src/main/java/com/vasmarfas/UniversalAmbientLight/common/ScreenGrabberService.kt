@@ -29,6 +29,7 @@ import com.vasmarfas.UniversalAmbientLight.common.network.HomeAssistantClient
 import com.vasmarfas.UniversalAmbientLight.common.network.HomeAssistantLamp
 import com.vasmarfas.UniversalAmbientLight.common.network.HyperionThread
 import com.vasmarfas.UniversalAmbientLight.common.network.OutputType
+import com.vasmarfas.UniversalAmbientLight.common.network.RgbwCalibration
 import com.vasmarfas.UniversalAmbientLight.common.network.Zigbee2MqttClient
 import com.vasmarfas.UniversalAmbientLight.common.util.AnalyticsHelper
 import com.vasmarfas.UniversalAmbientLight.common.util.AppOptions
@@ -407,6 +408,19 @@ class ScreenGrabberService : Service() {
         val wledBrightness = prefs.getInt(R.string.pref_key_wled_brightness, 255)
 
         val adalightProtocol = prefs.getString(R.string.pref_key_adalight_protocol, "ada") ?: "ada"
+        // Формат RGBW по умолчанию выключен: прежние устройства остаются на RGB24.
+        val directRgbw = prefs.getBoolean(R.string.pref_key_adalight_rgbw_direct, false)
+        val whiteIntensity = if (prefs.contains(R.string.pref_key_adalight_ice_white_intensity)) {
+            prefs.getInt(R.string.pref_key_adalight_ice_white_intensity, 180)
+        } else {
+            RgbwCalibration.legacyGainToIntensity(
+                prefs.getInt(R.string.pref_key_adalight_white_gain, 255)
+            )
+        }
+        val whiteMixerThreshold = prefs.getInt(R.string.pref_key_adalight_ice_white_threshold, 0)
+        val whiteRed = prefs.getInt(R.string.pref_key_adalight_white_red, 255)
+        val whiteGreen = prefs.getInt(R.string.pref_key_adalight_white_green, 255)
+        val whiteBlue = prefs.getInt(R.string.pref_key_adalight_white_blue, 255)
 
         val smoothingEnabled = prefs.getBoolean(R.string.pref_key_smoothing_enabled, false)
         val smoothingPreset = prefs.getString(R.string.pref_key_smoothing_preset, "off") ?: "off"
@@ -484,6 +498,12 @@ class ScreenGrabberService : Service() {
             wledRgbw = wledRgbw,
             wledBrightness = wledBrightness,
             adalightProtocol = adalightProtocol,
+            adalightRgbwDirect = directRgbw,
+            adalightIceWhiteIntensity = whiteIntensity,
+            adalightIceWhiteMixerThreshold = whiteMixerThreshold,
+            adalightWhiteRed = whiteRed,
+            adalightWhiteGreen = whiteGreen,
+            adalightWhiteBlue = whiteBlue,
             smoothingEnabled = smoothingEnabled,
             smoothingPreset = smoothingPreset,
             settlingTime = settlingTime,
@@ -1766,6 +1786,12 @@ class ScreenGrabberService : Service() {
             R.string.pref_key_reconnect_delay,
             R.string.pref_key_adalight_baudrate,
             R.string.pref_key_adalight_protocol,
+            R.string.pref_key_adalight_rgbw_direct,
+            R.string.pref_key_adalight_ice_white_intensity,
+            R.string.pref_key_adalight_ice_white_threshold,
+            R.string.pref_key_adalight_white_red,
+            R.string.pref_key_adalight_white_green,
+            R.string.pref_key_adalight_white_blue,
             R.string.pref_key_wled_color_order,
             R.string.pref_key_wled_protocol,
             R.string.pref_key_wled_rgbw,

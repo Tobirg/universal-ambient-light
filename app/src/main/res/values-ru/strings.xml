@@ -840,4 +840,12 @@
   <string name="pref_summary_mqtt_password_set">Сохранён</string>
   <string name="pref_title_z2m_base_topic">Базовая тема Zigbee2MQTT</string>
   <string name="lamps_hint_z2m">Список ламп приходит от брокера, его там держит сам Zigbee2MQTT. Проверьте адрес брокера, вход и базовую тему.</string>
+    <string name="adalight_rgbw_direct_title">Прямой RGBW (SK6812 / HyperSerial v11+)</string>
+    <string name="adalight_rgbw_direct_help">Только протокол AWA и RGBW-прошивка SK6812 версии v11 или новее. Отправляются 4 байта на LED. Для обычных RGB-лент и старых прошивок выключить.</string>
+    <string name="adalight_rgbw_intensity">Интенсивность белого LED (ICE)</string>
+    <string name="adalight_rgbw_threshold">Порог смешивания белого (ICE)</string>
+    <string name="adalight_rgbw_red">Красная составляющая белого LED</string>
+    <string name="adalight_rgbw_green">Зелёная составляющая белого LED</string>
+    <string name="adalight_rgbw_blue">Синяя составляющая белого LED</string>
+    <string name="adalight_rgbw_help">HyperHDR ICE RGBW: порог 0–100% определяет, когда добавляется белый канал; интенсивность 1,80 — по умолчанию (чем ярче считается белый диод, тем меньше значение W). Значение 0 выключает W. Коэффициенты RGB 0–255 задают оттенок белого диода. Другие протоколы остаются RGB.</string>
 </resources>

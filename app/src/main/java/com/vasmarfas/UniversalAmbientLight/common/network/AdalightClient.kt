@@ -22,6 +22,8 @@ class AdalightClient(
     settlingTime: Int = 200,
     outputDelayMs: Long = 80L,
     updateFrequency: Int = 25,
+    rgbwDirect: Boolean = false,
+    whiteCalibration: RgbwCalibration = RgbwCalibration(),
 ) : HyperionClient, StreamingClient {
 
     enum class ProtocolType {
@@ -48,6 +50,11 @@ class AdalightClient(
         "sp616e" -> ProtocolType.SP616E
         else -> ProtocolType.ADA
     }
+
+    // Только HyperSerial AWA с явным включением отправляет четыре канала.
+    private val mRgbwDirect = rgbwDirect && mProtocol == ProtocolType.AWA
+    private val mWhiteCalibration = whiteCalibration.normalized()
+    private val mAwaRgbw = AwaRgbw()
 
     private var mPort: UsbSerialPort? = null
 
@@ -82,6 +89,11 @@ class AdalightClient(
     private var mLastAutoThrottlePacketSize: Int = -1
 
     init {
+        if (mRgbwDirect) {
+            Log.i(TAG, "HyperSerial AWA direct RGBW enabled: AWa, RGBW32, " +
+                "whiteIntensity=${mWhiteCalibration.whiteLedIntensity / 100f}, " +
+                "whiteMixerThreshold=${mWhiteCalibration.whiteMixerThreshold}%")
+        }
         mSmoothing = ColorSmoothing { leds -> sendLedData(leds) }
         // Применить настройки сглаживания из preferences
         // Сначала применяем пресет как базовые значения
@@ -352,12 +364,15 @@ class AdalightClient(
         }
 
         try {
-            val packet = createPacket(mProtocol, leds)
-            maybeAutoThrottle(packet.size, leds.size)
-            mLastLeds = leds
-            mLastSendMs = System.currentTimeMillis()
             synchronized(mWriteLock) {
+                // ICE хранит предыдущее состояние каждого LED: пакеты и USB-записи
+                // должны быть строго упорядочены, включая keepalive.
+                val packet = if (mRgbwDirect) mAwaRgbw.packet(leds, mWhiteCalibration)
+                    else createPacket(mProtocol, leds)
+                if (!mRgbwDirect) maybeAutoThrottle(packet.size, leds.size)
                 port.write(packet, 1000)
+                mLastLeds = leds
+                mLastSendMs = System.currentTimeMillis()
             }
 
             // Изредка пишем в лог для диагностики

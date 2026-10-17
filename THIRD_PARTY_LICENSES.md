@@ -18,6 +18,17 @@ The app bundles the following third-party binary in `app/src/main/assets/`:
      - Copyright (C) 2018 Genymobile
      - Copyright (C) 2018-2025 Romain Vimont
 
+## Adapted Source Code
+
+1. **HyperHDR InfiniteColorEngineRgbw — RGBW mixing and adaptive temporal dithering**
+   - Upstream project: https://github.com/awawa-dev/HyperHDR
+   - Original source: https://github.com/awawa-dev/HyperHDR/blob/master/sources/led-drivers/InfiniteColorEngineRgbw.cpp
+   - License: **MIT License**
+   - Copyright (c) 2020-2026 awawa-dev
+   - Adapted implementation: `app/src/main/java/com/vasmarfas/UniversalAmbientLight/common/network/AwaRgbw.kt`
+   - This adaptation uses UAL's existing 8-bit RGB data; it does not include HyperHDR's entire high-precision linear-sRGB processing pipeline.
+   - The MIT license text is reproduced below in the **MIT License** section. The original copyright and permission notice must be retained when redistributing this adaptation.
+
 ## Direct Third-Party Dependencies (Gradle)
 
 The project also uses direct library dependencies from Maven/Google repositories:

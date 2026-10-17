@@ -352,4 +352,19 @@
     <integer name="pref_default_border_threshold" translatable="false">18</integer>
     <string name="pref_key_border_check_interval" translatable="false">pref_key_border_check_interval</string>
     <integer name="pref_default_border_check_interval" translatable="false">60</integer>
+    <!-- Дополнительные параметры RGBW используются только при явном включении AWa. -->
+    <string name="pref_key_adalight_rgbw_direct" translatable="false">pref_key_adalight_rgbw_direct</string>
+    <bool name="pref_default_adalight_rgbw_direct" translatable="false">false</bool>
+    <string name="pref_key_adalight_white_gain" translatable="false">pref_key_adalight_white_gain</string>
+    <integer name="pref_default_adalight_white_gain" translatable="false">255</integer>
+    <string name="pref_key_adalight_ice_white_intensity" translatable="false">pref_key_adalight_ice_white_intensity</string>
+    <integer name="pref_default_adalight_ice_white_intensity" translatable="false">180</integer>
+    <string name="pref_key_adalight_ice_white_threshold" translatable="false">pref_key_adalight_ice_white_threshold</string>
+    <integer name="pref_default_adalight_ice_white_threshold" translatable="false">0</integer>
+    <string name="pref_key_adalight_white_red" translatable="false">pref_key_adalight_white_red</string>
+    <integer name="pref_default_adalight_white_red" translatable="false">255</integer>
+    <string name="pref_key_adalight_white_green" translatable="false">pref_key_adalight_white_green</string>
+    <integer name="pref_default_adalight_white_green" translatable="false">255</integer>
+    <string name="pref_key_adalight_white_blue" translatable="false">pref_key_adalight_white_blue</string>
+    <integer name="pref_default_adalight_white_blue" translatable="false">255</integer>
 </resources>

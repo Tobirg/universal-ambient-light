@@ -21,6 +21,13 @@ data class ConnectionConfig(
     /** 0..255; 255 — отправлять цвета как есть. */
     val wledBrightness: Int = 255,
     val adalightProtocol: String = "ada",
+    // Только HyperSerial AWA v11+ и SK6812 RGBW. Старые протоколы остаются RGB24.
+    val adalightRgbwDirect: Boolean = false,
+    val adalightIceWhiteIntensity: Int = 180,
+    val adalightIceWhiteMixerThreshold: Int = 0,
+    val adalightWhiteRed: Int = 255,
+    val adalightWhiteGreen: Int = 255,
+    val adalightWhiteBlue: Int = 255,
     val smoothingEnabled: Boolean = true,
     val smoothingPreset: String = "balanced",
     val settlingTime: Int = 200,
