@@ -412,6 +412,11 @@ class ScreenGrabberService : Service() {
         val wledBrightness = prefs.getInt(R.string.pref_key_wled_brightness, 255)
 
         val adalightProtocol = prefs.getString(R.string.pref_key_adalight_protocol, "ada") ?: "ada"
+        val directRgbw = prefs.getBoolean(R.string.pref_key_adalight_rgbw_direct, false)
+        val whiteGain = prefs.getInt(R.string.pref_key_adalight_white_gain, 255)
+        val whiteRed = prefs.getInt(R.string.pref_key_adalight_white_red, 255)
+        val whiteGreen = prefs.getInt(R.string.pref_key_adalight_white_green, 255)
+        val whiteBlue = prefs.getInt(R.string.pref_key_adalight_white_blue, 255)
 
         val smoothingEnabled = prefs.getBoolean(R.string.pref_key_smoothing_enabled, false)
         val smoothingPreset = prefs.getString(R.string.pref_key_smoothing_preset, "off") ?: "off"
@@ -489,6 +494,11 @@ class ScreenGrabberService : Service() {
             wledRgbw = wledRgbw,
             wledBrightness = wledBrightness,
             adalightProtocol = adalightProtocol,
+            adalightRgbwDirect = directRgbw,
+            adalightWhiteGain = whiteGain,
+            adalightWhiteRed = whiteRed,
+            adalightWhiteGreen = whiteGreen,
+            adalightWhiteBlue = whiteBlue,
             smoothingEnabled = smoothingEnabled,
             smoothingPreset = smoothingPreset,
             settlingTime = settlingTime,
