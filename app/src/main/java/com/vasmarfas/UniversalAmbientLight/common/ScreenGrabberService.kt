@@ -1311,7 +1311,10 @@ class ScreenGrabberService : Service() {
                     )
                 }
             mActiveBackend = encoder
-            encoder.sendStatus()
+            // MStar сообщит о включении после первого успешного кадра.
+            // Не отправляем промежуточный false, пока VSS инициализируется.
+            // Оригинальный MTK THAL сохраняет прежнее поведение.
+            if (encoder !is MStarVssCaptureEncoder) encoder.sendStatus()
             return
         }
 
