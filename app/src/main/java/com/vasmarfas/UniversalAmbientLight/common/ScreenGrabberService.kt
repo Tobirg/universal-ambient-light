@@ -82,6 +82,7 @@ class ScreenGrabberService : Service() {
     private var mHasConnected = false
     private var mMediaProjectionManager: MediaProjectionManager? = null
     private var mHyperionThread: HyperionThread? = null
+    private var mLayoutTestEnabled = false
 
     // Дополнительный вывод на Home Assistant — работает параллельно с основным
     // подключением (например, основной вывод на WLED, а сбоку ещё лампы HA)
@@ -513,6 +514,7 @@ class ScreenGrabberService : Service() {
                 ?.ifEmpty { null } ?: Zigbee2MqttClient.DEFAULT_BASE_TOPIC
         )
         val thread = HyperionThread(mReceiver, baseContext, config)
+        if (mLayoutTestEnabled) thread.setLayoutTestEnabled(true)
         if (mCalibrating) thread.setCalibrating(true)
         mHyperionThread = thread
         thread.start()
@@ -752,6 +754,16 @@ class ScreenGrabberService : Service() {
                 }
 
                 ACTION_STOP -> stopAllCapture()
+                ACTION_LAYOUT_TEST -> {
+                    // Проверка раскладки действует только на уже подключённый вывод.
+                    // Не создаём новый захват и не перезапускаем USB-соединение.
+                    if (mHyperionThread == null) {
+                        stopSelf()
+                    } else {
+                        mLayoutTestEnabled = intent.getBooleanExtra(EXTRA_LAYOUT_TEST_ENABLED, false)
+                        mHyperionThread?.setLayoutTestEnabled(mLayoutTestEnabled)
+                    }
+                }
                 ACTION_CLEAR -> {
                     // Один чёрный кадр, но соединение оставляем
                     val backend = mActiveBackend
@@ -1424,6 +1436,7 @@ class ScreenGrabberService : Service() {
     private fun stopAllCapture() {
         if (DEBUG) Log.v(TAG, "Stopping all capture")
         mReconnectEnabled = false
+        mLayoutTestEnabled = false
         stopAppWatch()
         mNotificationManager?.cancel(NOTIFICATION_ID)
 
@@ -1740,6 +1753,8 @@ class ScreenGrabberService : Service() {
         const val ACTION_START_EFFECT = BASE + "ACTION_START_EFFECT"
         const val ACTION_STOP = BASE + "ACTION_STOP"
         const val ACTION_CLEAR = BASE + "ACTION_CLEAR"
+        const val ACTION_LAYOUT_TEST = BASE + "ACTION_LAYOUT_TEST"
+        const val EXTRA_LAYOUT_TEST_ENABLED = BASE + "EXTRA_LAYOUT_TEST_ENABLED"
         const val ACTION_DETECT_FRAME = BASE + "ACTION_DETECT_FRAME"
         const val ACTION_SLEEP_TIMER = BASE + "ACTION_SLEEP_TIMER"
         const val EXTRA_SLEEP_MINUTES = BASE + "EXTRA_SLEEP_MINUTES"
