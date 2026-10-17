@@ -687,6 +687,7 @@ class ScreenGrabberService : Service() {
             when (action) {
                 ACTION_START -> if (mHyperionThread == null) {
                     mStartInProgress = true
+                    mHasConnected = false
                     notifyActivity()
                     mCaptureSource = "screen"
                     val prefs = Preferences(this)
@@ -731,6 +732,7 @@ class ScreenGrabberService : Service() {
 
                 ACTION_START_CAMERA -> if (mHyperionThread == null) {
                     mStartInProgress = true
+                    mHasConnected = false
                     notifyActivity()
                     mCaptureSource = "camera"
                     if (!tryStartForegroundCamera()) return stopWithoutForeground()
@@ -746,6 +748,7 @@ class ScreenGrabberService : Service() {
 
                 ACTION_START_EFFECT -> if (mHyperionThread == null) {
                     mStartInProgress = true
+                    mHasConnected = false
                     notifyActivity()
                     mCaptureSource = "effect"
                     if (!tryStartForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)) {
@@ -798,6 +801,7 @@ class ScreenGrabberService : Service() {
                     if (enabled) {
                         if (mHyperionThread == null) {
                             mStartInProgress = true
+                            mHasConnected = false
                             notifyActivity()
                             // При выключенном захвате открываем только USB-подключение.
                             // Ни MediaProjection, ни VSS, ни новый энкодер не запускаются.
@@ -1507,6 +1511,7 @@ class ScreenGrabberService : Service() {
 
     private fun stopAllCapture() {
         mStartInProgress = false
+        mHasConnected = false
         if (DEBUG) Log.v(TAG, "Stopping all capture")
         mReconnectEnabled = false
         mLayoutTestEnabled = false
@@ -1722,6 +1727,8 @@ class ScreenGrabberService : Service() {
         val oldSecondary = mSecondaryHyperionThread
         Log.i(TAG, "Connection settings changed, restarting the output")
         mStartInProgress = true
+        mHasConnected = false
+        notifyActivity()
         mOutput = null
         mHyperionThread = null
         mSecondaryHyperionThread = null
