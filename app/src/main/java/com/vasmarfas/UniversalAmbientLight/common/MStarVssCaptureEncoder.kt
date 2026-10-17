@@ -42,6 +42,7 @@ class MStarVssCaptureEncoder(
     // Одна реальная очистка на экземпляр процесса; остальные вызывающие ждут её завершения.
     private class StopTicket {
         val started = AtomicBoolean(false)
+        val pidReady = CountDownLatch(1)
         val finished = CountDownLatch(1)
     }
     private var worker: HandlerThread? = null
@@ -187,28 +188,37 @@ class MStarVssCaptureEncoder(
             return
         }
         try {
-            finishProcess(proc, pidHolder)
+            finishProcess(proc, pidHolder, stop)
         } finally {
             stop.finished.countDown()
         }
     }
 
     // Полная остановка выполняется единственный раз, вне главного потока Android.
-    private fun finishProcess(proc: java.lang.Process, pidHolder: AtomicInteger?) {
+    private fun finishProcess(proc: java.lang.Process, pidHolder: AtomicInteger?, stop: StopTicket) {
         Log.i(TAG, "Остановка MStar VSS, PID=" + (pidHolder?.get() ?: -1))
         requestStop(proc)
         try {
-            // Сначала ждём штатного закрытия канала. Даже если su уже завершился,
-            // ниже всё равно проверяем PID нативного сервера отдельно.
+            // stderr читается отдельно: при очень быстрой остановке он может ещё
+            // не успеть передать MSTAR_PID. Подождём PID короткое ограниченное время
+            // на потоке очистки, НЕ на UI-потоке, прежде чем проверять /proc.
             proc.waitFor(250, TimeUnit.MILLISECONDS)
-            ensureNativeStopped(pidHolder?.get() ?: -1)
+            if ((pidHolder?.get() ?: -1) <= 1 && proc.isAlive) {
+                stop.pidReady.await(750, TimeUnit.MILLISECONDS)
+            }
+            val pid = pidHolder?.get() ?: -1
+            if (pid > 1) {
+                ensureNativeStopped(pid)
+            } else {
+                Log.w(TAG, "VSS PID не получен: останавливаем su; нативный PID неизвестен")
+            }
             if (proc.isAlive) {
                 proc.destroy()
                 if (!proc.waitFor(250, TimeUnit.MILLISECONDS)) proc.destroyForcibly()
             }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            proc.destroy()
+            proc.destroyForcibly()
         } finally {
             try { proc.outputStream.close() } catch (_: IOException) { }
         }
@@ -250,6 +260,7 @@ class MStarVssCaptureEncoder(
                             line.removePrefix("MSTAR_PID=").toIntOrNull()?.let { pid ->
                                 if (pid > 1) {
                                     pidHolder.set(pid)
+                                    stop.pidReady.countDown()
                                     Log.i(TAG, "MStar VSS native PID=$pid")
                                 }
                             }
