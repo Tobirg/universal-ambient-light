@@ -151,7 +151,9 @@ class MainActivity : ComponentActivity() {
             mRecorderRunning = checked
             mLocalStartPending = starting
 
-            if (!checked && !starting) mLocalStartDispatched = false
+            // Внешний запуск (плитка, автозапуск, пульт) тоже можно отменить
+            // с главного экрана, даже если команда пришла не из MainActivity.
+            mLocalStartDispatched = checked || starting
             mLastError = if (checked || starting) null else error
             mSleepAt = intent.getLongExtra(ScreenGrabberService.BROADCAST_SLEEP_AT, 0L)
             val tclBlocked =
