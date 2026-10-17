@@ -192,10 +192,54 @@ internal fun ColumnScope.ConnectionSection(
                     entriesRes = R.array.pref_list_adalight_protocol,
                     entryValuesRes = R.array.pref_list_adalight_protocol_values,
                     onValueChange = { newProtocol ->
+                        state.adalightProtocol = newProtocol
                         AnalyticsHelper.logAdalightProtocolChanged(context, newProtocol)
                         AnalyticsHelper.logSettingChanged(context, "adalight_protocol", newProtocol)
                     }
                 )
+                // RGBW-пакеты AWa поддерживает только HyperSerial v11+.
+                // Для классического Adalight и других протоколов настройку не показываем.
+                if (state.adalightProtocol == "awa" || state.adalightProtocol == "2") {
+                    CheckBoxPreference(
+                        prefs = prefs,
+                        keyRes = R.string.pref_key_adalight_rgbw_direct,
+                        title = stringResource(R.string.adalight_rgbw_direct_title),
+                        summary = stringResource(R.string.adalight_rgbw_direct_help),
+                        onValueChange = { state.adalightRgbwDirect = it }
+                    )
+                    if (state.adalightRgbwDirect) {
+                        Text(
+                            text = stringResource(R.string.adalight_rgbw_help),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        SliderPreference(
+                            prefs = prefs,
+                            keyRes = R.string.pref_key_adalight_white_gain,
+                            title = stringResource(R.string.adalight_rgbw_gain),
+                            range = 0..255,
+                        )
+                        SliderPreference(
+                            prefs = prefs,
+                            keyRes = R.string.pref_key_adalight_white_red,
+                            title = stringResource(R.string.adalight_rgbw_red),
+                            range = 0..255,
+                        )
+                        SliderPreference(
+                            prefs = prefs,
+                            keyRes = R.string.pref_key_adalight_white_green,
+                            title = stringResource(R.string.adalight_rgbw_green),
+                            range = 0..255,
+                        )
+                        SliderPreference(
+                            prefs = prefs,
+                            keyRes = R.string.pref_key_adalight_white_blue,
+                            title = stringResource(R.string.adalight_rgbw_blue),
+                            range = 0..255,
+                        )
+                    }
+                }
             }
 
             OutputType.HUE -> {
