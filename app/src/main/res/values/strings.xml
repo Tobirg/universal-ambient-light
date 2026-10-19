@@ -623,6 +623,7 @@
   <string name="effect_comet">Comet</string>
   <string name="effect_layout_test">Layout test</string>
   <string name="effect_layout_test_hint">Top is red, right is green, bottom is blue, left is yellow. The white dot runs from the first LED in the numbering direction. If the colors or the path of the dot do not match the strip, fix the LED layout.</string>
+  <string name="effect_layout_test_strip_hint">On an LED strip the side boundaries of this pattern shift with scan depth and capture margins. For an exact check of every LED, open LED Layout and turn on \"Show LED layout test\".</string>
   <string name="home_source_effect">Effect: %1$s</string>
   <string name="remote_error_update_tv">The app on the TV is older than this feature. Update it on the TV.</string>
 

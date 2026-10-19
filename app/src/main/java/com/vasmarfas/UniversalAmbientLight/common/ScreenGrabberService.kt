@@ -484,17 +484,14 @@ class ScreenGrabberService : Service() {
         }
 
         val outputType = OutputType.of(mConnectionType)
-        // Особые умолчания нужны только автономному тесту адресной ленты.
-        // Обычный захват сохраняет прежний контракт адреса и порта.
-        val finalHost = if (outputOnly && outputType == OutputType.E131) host.orEmpty()
-            else host ?: "localhost"
-        val finalPort = if (port > 0) port else if (outputOnly) {
-            when (outputType) {
-                OutputType.WLED -> if (wledProtocol == "ddp") OutputType.DDP.defaultPort
-                    else outputType.defaultPort
-                else -> outputType.defaultPort.takeIf { it > 0 } ?: OutputType.HYPERION.defaultPort
-            }
-        } else 19400
+        // Выбор E1.31 в списке контроллеров не сохраняет пустой адрес, если старый тоже был
+        // пустым: отсутствующий ключ значит то же, что пустое поле, то есть мультикаст
+        val finalHost = host ?: if (outputType == OutputType.E131) "" else "localhost"
+        val finalPort = if (port > 0) port else when (outputType) {
+            OutputType.WLED -> if (wledProtocol == "ddp") OutputType.DDP.defaultPort
+                else outputType.defaultPort
+            else -> outputType.defaultPort.takeIf { it > 0 } ?: OutputType.HYPERION.defaultPort
+        }
 
         val config = ConnectionConfig(
             host = finalHost,
