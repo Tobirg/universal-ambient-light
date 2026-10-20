@@ -123,6 +123,7 @@
     <item>ADB (Screenshot, ~200ms)</item>
     <item>Accessibility (Android 11+)</item>
     <item>MTK Hardware Capture (Root)</item>
+    <item>MStar VSS Hardware Capture (Root)</item>
   </string-array>
   <string-array name="pref_list_capture_method_values">
     <item>media_projection</item>
@@ -133,6 +134,7 @@
     <item>adb_local</item>
     <item>accessibility</item>
     <item>mtk_thal_capture</item>
+    <item>mstar_vss_capture</item>
   </string-array>
 
   <string name="pref_title_adb_port">ADB Port</string>
@@ -867,4 +869,5 @@
     <string name="remote_layout_test_timeout">Timed out waiting for USB permission on the TV</string>
     <string name="remote_layout_test_denied">USB permission or LED test start denied on the TV</string>
     <string name="led_layout_direct_test">Show LED layout test</string>
+    <string name="error_mstar_capture_stopped">MStar hardware capture stopped: %1$s</string>
 </resources>

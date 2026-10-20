@@ -2,6 +2,10 @@ package com.vasmarfas.UniversalAmbientLight.ui.settings
 
 import android.content.Context
 import android.widget.Toast
+import com.vasmarfas.UniversalAmbientLight.common.util.CaptureAvailabilityMonitor
+import com.vasmarfas.UniversalAmbientLight.common.MStarVssCaptureEncoder
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,6 +78,18 @@ internal fun ColumnScope.CaptureSection(prefs: Preferences, state: SettingsScree
             // Доступные методы решает устройство, которое снимает экран: в режиме пульта —
             // телевизор (флейвор, MTK, служба доступности), а не телефон
             val remoteCaps = remote?.caps
+            // Проверку локального устройства ведёт Handler-хелпер, а не Compose-корутина.
+            // В режиме пульта используем только объявленные телевизором возможности.
+            val localCapture = remote == null
+            var mtkAvailable by remember(localCapture) {
+                mutableStateOf(localCapture && CaptureAvailabilityMonitor.isAvailable())
+            }
+            DisposableEffect(localCapture) {
+                val monitor = if (localCapture && !mtkAvailable) {
+                    CaptureAvailabilityMonitor { mtkAvailable = true }.also { it.start() }
+                } else null
+                onDispose { monitor?.stop() }
+            }
             ListPreference(
                 prefs = prefs,
                 keyRes = R.string.pref_key_capture_method,
@@ -81,7 +97,7 @@ internal fun ColumnScope.CaptureSection(prefs: Preferences, state: SettingsScree
                 entriesRes = R.array.pref_list_capture_method,
                 entryValuesRes = R.array.pref_list_capture_method_values,
                 recomposeKey = state.captureMethod to state.captureMethodRevision,
-                disabledIndices = remember(remoteCaps) {
+                disabledIndices = remember(remoteCaps, mtkAvailable) {
                     val entryValues =
                         context.resources.getStringArray(R.array.pref_list_capture_method_values)
                     entryValues.indices.filter { index ->
@@ -89,7 +105,8 @@ internal fun ColumnScope.CaptureSection(prefs: Preferences, state: SettingsScree
                         if (remoteCaps != null) {
                             value !in remoteCaps.methods
                         } else {
-                            value == "mtk_thal_capture" && !MtkThalCaptureEncoder.isAvailable()
+                            (value == "mtk_thal_capture" && !MtkThalCaptureEncoder.isAvailable()) ||
+                                (value == "mstar_vss_capture" && !MStarVssCaptureEncoder.isAvailable())
                         }
                     }.toSet()
                 },

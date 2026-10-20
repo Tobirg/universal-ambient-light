@@ -17,3 +17,11 @@ set_target_properties(libmtk_thal_capture_server.so PROPERTIES
     PREFIX ""
     SUFFIX ""
 )
+
+# Самостоятельный сервер VSS для ARM32. Фирменные библиотеки и заголовки
+# не включаются: символы MTVSS_* загружаются из /vendor/lib при запуске.
+add_executable(libmstar_vss_server.so
+    mstar_vss_server.c
+)
+target_link_libraries(libmstar_vss_server.so dl)
+set_target_properties(libmstar_vss_server.so PROPERTIES PREFIX "" SUFFIX "")

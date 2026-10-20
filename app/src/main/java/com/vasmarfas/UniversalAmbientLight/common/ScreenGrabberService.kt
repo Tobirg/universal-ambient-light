@@ -1377,6 +1377,21 @@ class ScreenGrabberService : Service() {
             return
         }
 
+        if (method == "mstar_vss_capture") {
+            val encoder = MStarVssCaptureEncoder(
+                applicationContext, newGate(), options,
+                mOnFatalError = { errorMsg ->
+                    mHandler?.post {
+                        mStartError = errorMsg
+                        haltStartup()
+                    }
+                }
+            )
+            mActiveBackend = encoder
+            encoder.sendStatus()
+            return
+        }
+
         if (method == "mtk_thal_capture") {
             if (DEBUG) Log.v(TAG, "Creating MTK THAL Capture encoder")
             val encoder = MtkThalCaptureEncoder(
