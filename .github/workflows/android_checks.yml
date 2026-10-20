@@ -1,0 +1,161 @@
+name: Android Checks
+run-name: Android Checks (${{ inputs.target_ref || github.head_ref || github.ref_name }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Branch or commit to build and test (empty = selected branch)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Unit tests (both flavors)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref || github.head_ref || github.ref_name }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - run: chmod +x ./gradlew
+      - name: Run unit tests
+        run: ./gradlew testFullDebugUnitTest testPlaystoreDebugUnitTest --stacktrace
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unit-test-reports
+          if-no-files-found: warn
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+
+  build-full:
+    name: Full debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref || github.head_ref || github.ref_name }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - run: chmod +x ./gradlew
+      - name: Assemble Full debug with diagnostic logging
+        run: ./gradlew assembleFullDebug --info --stacktrace --console=plain
+        timeout-minutes: 25
+      - name: Upload Full APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-full-debug-apk
+          path: app/build/outputs/apk/full/debug/*.apk
+          if-no-files-found: error
+
+  build-playstore:
+    name: Playstore debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref || github.head_ref || github.ref_name }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - run: chmod +x ./gradlew
+      - name: Assemble Playstore debug with diagnostic logging
+        run: ./gradlew assemblePlaystoreDebug --info --stacktrace --console=plain
+        timeout-minutes: 25
+      - name: Upload Playstore APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-playstore-debug-apk
+          path: app/build/outputs/apk/playstore/debug/*.apk
+          if-no-files-found: error
+
+  lint:
+    name: Android lint (Full)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref || github.head_ref || github.ref_name }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - run: chmod +x ./gradlew
+      - name: Build upstream master lint baseline
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 https://github.com/vasmarfas/universal-ambient-light.git master
+          git worktree add --detach "$RUNNER_TEMP/ual-master" FETCH_HEAD
+          (
+            cd "$RUNNER_TEMP/ual-master"
+            chmod +x ./gradlew
+            ./gradlew lintFullDebug --console=plain || true
+          )
+          report="$RUNNER_TEMP/ual-master/app/build/reports/lint-results-fullDebug.xml"
+          test -s "$report" || { echo "::error::Upstream lint baseline report missing"; exit 1; }
+          cp "$report" "$RUNNER_TEMP/upstream-lint.xml"
+      - name: Run lint and compare with upstream master
+        shell: bash
+        run: |
+          ./gradlew lintFullDebug --console=plain || true
+          test -s app/build/reports/lint-results-fullDebug.xml || { echo "::error::Feature lint report missing"; exit 1; }
+          python3 - "$RUNNER_TEMP/upstream-lint.xml" app/build/reports/lint-results-fullDebug.xml <<'PY'
+          import collections
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          def issues(filename):
+              root = ET.parse(filename).getroot()
+              result = collections.Counter()
+              for issue in root.findall("issue"):
+                  for location in issue.findall("location"):
+                      path = location.get("file", "").replace("\\", "/")
+                      if "/app/" in path:
+                          path = "app/" + path.split("/app/", 1)[1]
+                      else:
+                          path = os.path.basename(path)
+                      result[(issue.get("id", ""), path, issue.get("message", ""))] += 1
+              return result
+
+          baseline = issues(sys.argv[1])
+          current = issues(sys.argv[2])
+          added = current - baseline
+          print(f"Upstream lint findings: {sum(baseline.values())}")
+          print(f"Feature lint findings: {sum(current.values())}")
+          print(f"New lint findings: {sum(added.values())}")
+          for (rule, path, message), count in sorted(added.items()):
+              print(f"::error file={path}::{rule}: {message} ({count})")
+          sys.exit(1 if added else 0)
+          PY
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-reports
+          if-no-files-found: warn
+          path: |
+            app/build/reports/lint-results-*
+            app/build/outputs/lint-results-*
