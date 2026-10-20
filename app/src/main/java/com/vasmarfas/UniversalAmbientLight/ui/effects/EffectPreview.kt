@@ -65,6 +65,9 @@ fun EffectPreview(config: EffectConfig, animate: Boolean, modifier: Modifier = M
 }
 
 private fun DrawScope.drawTvWithLeds(frame: ByteArray) {
+    // Canvas может прийти с нулевой шириной (Vivo 1723, Android 9), а RadialGradient
+    // с нулевым радиусом свечения бросает IllegalArgumentException
+    if (size.isEmpty()) return
     val tvWidth = size.width * 0.7f
     val tvHeight = tvWidth * 9f / 16f
     val left = (size.width - tvWidth) / 2
