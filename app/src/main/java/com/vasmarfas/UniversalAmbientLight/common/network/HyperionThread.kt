@@ -458,7 +458,9 @@ class HyperionThread(
                 effectiveDelayMs,
                 mUpdateFrequency,
                 mWledRgbw,
-                mWledBrightness
+                mWledBrightness,
+                mConfig.wledRgbwColorMode,
+                mConfig.rgbwCalibration, mConfig.smoothingAlgorithm, mConfig.smoothingLuminanceLimit
             )
 
             // DDP понимают не только WLED: xLights, FPP, ESPixelStick - клиент тот же
@@ -473,12 +475,16 @@ class HyperionThread(
                 mSmoothingPreset,
                 mSettlingTime,
                 effectiveDelayMs,
-                mUpdateFrequency
+                mUpdateFrequency,
+                smoothingAlgorithm = mConfig.smoothingAlgorithm,
+                smoothingLuminanceLimit = mConfig.smoothingLuminanceLimit,
             )
 
             OutputType.ADALIGHT -> AdalightClient(
                 mContext, mPriority, mBaudRate, mAdalightProtocol,
-                effectiveSmoothing, mSmoothingPreset, mSettlingTime, effectiveDelayMs, mUpdateFrequency
+                effectiveSmoothing, mSmoothingPreset, mSettlingTime, effectiveDelayMs, mUpdateFrequency,
+                mConfig.hyperSerialColorMode,
+                mConfig.rgbwCalibration, mConfig.smoothingAlgorithm, mConfig.smoothingLuminanceLimit
             )
 
             OutputType.HOME_ASSISTANT -> HomeAssistantClient(
@@ -538,7 +544,8 @@ class HyperionThread(
     }
 
     private fun streamSmoothing() = LedStreamClient.SmoothingSettings(
-        effectiveSmoothing, mSmoothingPreset, mSettlingTime, effectiveDelayMs, mUpdateFrequency
+        effectiveSmoothing, mSmoothingPreset, mSettlingTime, effectiveDelayMs, mUpdateFrequency,
+        mConfig.smoothingAlgorithm, mConfig.smoothingLuminanceLimit,
     )
 
     private fun lampSettings() = ZoneLampClient.LampSettings(

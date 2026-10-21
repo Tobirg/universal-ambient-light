@@ -30,6 +30,10 @@ class WLEDClient(
     updateFrequency: Int = 25,
     rgbw: Boolean = false,
     brightness: Int = 255,
+    rgbwColorMode: String = "rgbw",
+    rgbwCalibration: RgbwCalibration = RgbwCalibration(),
+    smoothingAlgorithm: String = "linear",
+    smoothingLuminanceLimit: Int = 0,
 ) : HyperionClient, StreamingClient, AddressableLedClient {
 
     enum class Protocol {
@@ -44,6 +48,11 @@ class WLEDClient(
         else -> Protocol.DDP
     }
     private val mRgbw: Boolean = rgbw
+    private val mIceRgbw = InfiniteColorEngineRgbw(
+        rgbwCalibration.whiteThreshold, rgbwCalibration.whiteIntensity,
+        floatArrayOf(rgbwCalibration.whiteRed, rgbwCalibration.whiteGreen, rgbwCalibration.whiteBlue),
+    )
+    private val mUseIce = rgbw && rgbwColorMode.equals("ice", ignoreCase = true)
     private val mBrightness: Int = brightness.coerceIn(0, 255)
 
     @Volatile
@@ -78,8 +87,12 @@ class WLEDClient(
         Thread(r, "WLEDClient-resume").apply { isDaemon = true }
     }
 
+    private data class SentFrame(val colors: Array<ColorRgb>, val precise: FloatArray?)
+
     @Volatile
-    private var mLastLeds: Array<ColorRgb>? = null
+    private var mLastFrame: SentFrame? = null
+    private val mLastLeds: Array<ColorRgb>?
+        get() = mLastFrame?.colors
 
     @Volatile
     private var mPaused = false
@@ -100,11 +113,20 @@ class WLEDClient(
             mPort = port
         }
 
-        mSmoothing = ColorSmoothing { leds ->
-            synchronized(mLayoutTest) {
-                if (!mLayoutTest.enabled) sendLedData(leds)
+        mSmoothing = ColorSmoothing(object : ColorSmoothing.LedDataSender {
+            override fun sendLedData(colors: Array<ColorRgb>) {
+                synchronized(mLayoutTest) {
+                    if (!mLayoutTest.enabled) this@WLEDClient.sendLedData(colors)
+                }
             }
-        }
+
+            override fun sendPreciseLedData(colors: Array<ColorRgb>, precise: FloatArray) {
+                synchronized(mLayoutTest) {
+                    if (!mLayoutTest.enabled) this@WLEDClient.sendLedData(colors, precise)
+                }
+            }
+        })
+        mSmoothing.setAlgorithm(smoothingAlgorithm, smoothingLuminanceLimit)
         mSmoothing.applyPreset(smoothingPreset)
         val presetValues = getPresetValues(smoothingPreset)
         if (settlingTime != presetValues.settlingTime) {
@@ -126,10 +148,10 @@ class WLEDClient(
         mKeepAliveExecutor.scheduleWithFixedDelay({
             synchronized(mLayoutTest) {
                 mLayoutTest.refresh()
-                val lastLeds = mLastLeds
-                if (mPaused || !mConnected || lastLeds == null) return@scheduleWithFixedDelay
-                // Повторяем копию: рабочий буфер сглаживания меняется на ходу.
-                sendLedData(Array(lastLeds.size) { lastLeds[it].clone() })
+                val last = mLastFrame ?: return@scheduleWithFixedDelay
+                if (mPaused || !mConnected) return@scheduleWithFixedDelay
+                // Дробный кадр повторяем без округления и повторной смены цели ICE.
+                sendLedData(Array(last.colors.size) { last.colors[it].clone() }, last.precise)
             }
         }, 1000, 1000, TimeUnit.MILLISECONDS)
     }
@@ -222,22 +244,23 @@ class WLEDClient(
         }
 
         val hadConnection = isConnected()
-        // Снимок делаем один раз: mLastLeds помечено @Volatile, так что чтение безопасно, а
-        // копия защищает от параллельной правки из sendLedData в другом потоке.
-        val snapshot = mLastLeds?.let { Array(it.size) { i -> it[i].clone() } }
+        // Снимок обеих форм цвета читаем одной volatile-ссылкой; копия RGB защищает
+        // повторную отправку от изменений буфера другого потока.
+        val lastFrame = mLastFrame
+        val snapshot = lastFrame?.colors?.let { Array(it.size) { i -> it[i].clone() } }
 
         if (mResumeExecutor.isShutdown) return
         try {
             mResumeExecutor.submit {
                 try {
                     if (hadConnection && wasBlocked && snapshot != null) {
-                        sendLedData(snapshot)
+                        sendLedData(snapshot, lastFrame.precise)
                     }
                     if (!hadConnection) {
                         reconnectIfNeeded()
                         if (isConnected() && snapshot != null) {
                             mSmoothing.setTargetColors(snapshot)
-                            sendLedData(snapshot)
+                            sendLedData(snapshot, lastFrame.precise)
                         }
                     } else if (wasBlocked && snapshot != null) {
                         mSmoothing.setTargetColors(snapshot)
@@ -326,10 +349,10 @@ class WLEDClient(
         mSmoothing.setTargetColors(leds)
     }
 
-    private fun sendLedData(leds: Array<ColorRgb>) {
+    private fun sendLedData(leds: Array<ColorRgb>, precise: FloatArray? = null) {
         if (!isConnected() || mPaused) return
-        // Ссылка volatile — keepalive увидит либо прежний массив, либо новый.
-        mLastLeds = leds
+        // Оба представления публикуются вместе, чтобы keepalive не смешал разные кадры.
+        mLastFrame = SentFrame(leds, precise)
 
         // Часть прошивок Android TV режет отправку UDP (sendto даёт EPERM) при SCREEN_OFF.
         // Не пытаемся слать на каждой итерации, чтобы не засорять лог и не жечь процессор.
@@ -353,14 +376,20 @@ class WLEDClient(
                 }
             }
 
+            // ICE применяется один раз на кадр, до разбивки DDP на пакеты.
+            val iceChannels = if (mUseIce && leds.isNotEmpty() &&
+                (mProtocol == Protocol.DDP || (mPort != HYPERION_RAW_PORT && leds.size <= MAX_LEDS_DRGBW))
+            ) {
+                mIceRgbw.convert(leds, brightness = mBrightness, precise = precise)
+            } else null
             if (mProtocol == Protocol.DDP) {
-                val packets = createDdpPackets(leds)
+                val packets = createDdpPackets(leds, iceChannels)
                 for (packet in packets) {
                     sendPacket(packet)
                 }
             } else {
                 // Запасной путь — UDP raw
-                sendUdpRaw(leds)
+                sendUdpRaw(leds, iceChannels)
             }
 
             // Отправка прошла — считаем устройство проснувшимся и снимаем блокировку.
@@ -408,7 +437,7 @@ class WLEDClient(
     }
 
     // Реализация протокола DDP
-    private fun createDdpPackets(leds: Array<ColorRgb>): List<ByteArray> {
+    private fun createDdpPackets(leds: Array<ColorRgb>, iceChannels: ByteArray? = null): List<ByteArray> {
         val packets = ArrayList<ByteArray>()
         val bytesPerPixel = bytesPerPixel()
         // Предел пакета в байтах данных, а не в светодиодах: RGBW-лента на пределе в 480
@@ -428,27 +457,8 @@ class WLEDClient(
 
             val packet = ByteArray(DDP_HEADER_SIZE + packetDataSize)
 
-            // Заголовок
-            packet[0] = (0x40 or (if (isLastPacket) 0x01 else 0x00)).toByte() // VER1 | PUSH
-            packet[1] = 0 // Sequence number 0 (ignored by receiver)
-            // Байт типа данных DDP: биты 5-3 — формат (001 = RGB, 011 = RGBW), биты 2-0 —
-            // разрядность канала (011 = 8 бит). WLED различает RGB/RGBW именно по битам
-            // формата; customer-бит и коды разрядности «на пиксель» из старой версии были
-            // отсебятиной вне спецификации.
-            packet[2] = if (mRgbw) 0x1B.toByte() else 0x0B.toByte()
-
-            packet[3] = 0x01 // ID: DISPLAY
-
-            // Смещение (big endian)
-            val offset = channelOffset // Offset in BYTES (channels)
-            packet[4] = ((offset shr 24) and 0xFF).toByte()
-            packet[5] = ((offset shr 16) and 0xFF).toByte()
-            packet[6] = ((offset shr 8) and 0xFF).toByte()
-            packet[7] = (offset and 0xFF).toByte()
-
-            // Длина (big endian)
-            packet[8] = ((packetDataSize shr 8) and 0xFF).toByte()
-            packet[9] = (packetDataSize and 0xFF).toByte()
+            // Общая сериализация заголовка DDP, проверяемая JUnit-тестами.
+            WledDdpHeader.write(packet, channelOffset, packetDataSize, mRgbw, isLastPacket)
 
             if (logsEnabled && System.currentTimeMillis() % 1000 < 50) {
                 val hexHeader = packet.take(10).joinToString(" ") { String.format("%02X", it) }
@@ -464,7 +474,7 @@ class WLEDClient(
             val ledsInThisPacket = packetDataSize / bytesPerPixel
 
             for (i in 0 until ledsInThisPacket) {
-                dataIdx = writePixel(packet, dataIdx, leds[ledsProcessed + i], mColorOrder)
+                dataIdx = writePixel(packet, dataIdx, leds[ledsProcessed + i], mColorOrder, iceChannels, ledsProcessed + i)
             }
 
             packets.add(packet)
@@ -477,7 +487,7 @@ class WLEDClient(
     // Устаревший UDP raw. На порту 19446 WLED слушает приёмник Hyperion (сырой RGB),
     // на остальных портах — свои realtime-протоколы DRGB/DRGBW/DNRGB с заголовком.
     @Throws(IOException::class)
-    private fun sendUdpRaw(leds: Array<ColorRgb>) {
+    private fun sendUdpRaw(leds: Array<ColorRgb>, iceChannels: ByteArray? = null) {
         if (mPort == HYPERION_RAW_PORT) {
             sendHyperionRaw(leds)
             return
@@ -488,7 +498,7 @@ class WLEDClient(
 
         if (mRgbw) {
             if (ledCount <= MAX_LEDS_DRGBW) {
-                sendPacket(createDrgbwPacket(leds))
+                sendPacket(createDrgbwPacket(leds, iceChannels))
                 return
             }
             // Протокола RGBW со стартовым индексом (аналога DNRGB) в WLED не описано,
@@ -567,14 +577,14 @@ class WLEDClient(
     }
 
     /** DRGBW: как DRGB, но четыре байта на светодиод (см. UDP realtime в документации WLED). */
-    private fun createDrgbwPacket(leds: Array<ColorRgb>): ByteArray {
+    private fun createDrgbwPacket(leds: Array<ColorRgb>, iceChannels: ByteArray? = null): ByteArray {
         val packet = ByteArray(2 + leds.size * 4)
         packet[0] = PROTOCOL_DRGBW
         packet[1] = WLED_TIMEOUT_SECONDS
 
         var idx = 2
-        for (led in leds) {
-            idx = writePixel(packet, idx, led, mColorOrder)
+        for (i in leds.indices) {
+            idx = writePixel(packet, idx, leds[i], mColorOrder, iceChannels, i)
         }
         return packet
     }
@@ -604,15 +614,28 @@ class WLEDClient(
      * всех трёх каналов часть уходит на белый светодиод и вычитается из цветных: белый
      * ярче и чище смешанного из RGB, а суммарная яркость точки не меняется.
      */
-    private fun writePixel(packet: ByteArray, offset: Int, led: ColorRgb, order: String): Int {
+    private fun writePixel(
+        packet: ByteArray, offset: Int, led: ColorRgb, order: String,
+        iceChannels: ByteArray? = null, ledIndex: Int = 0,
+    ): Int {
         if (!mRgbw) return writeRgb(packet, offset, led, order)
+        if (iceChannels != null) {
+            val source = ledIndex * 4
+            val idx = writeChannels(
+                packet, offset, iceChannels[source].toInt() and 0xFF,
+                iceChannels[source + 1].toInt() and 0xFF,
+                iceChannels[source + 2].toInt() and 0xFF, order
+            )
+            packet[idx] = iceChannels[source + 3]
+            return idx + 1
+        }
 
         val r = scaled(led.red)
         val g = scaled(led.green)
         val b = scaled(led.blue)
-        val w = min(r, min(g, b))
-        val idx = writeChannels(packet, offset, r - w, g - w, b - w, order)
-        packet[idx] = w.toByte()
+        val white = HyperSerialRgbwColor.white(r, g, b)
+        val idx = writeChannels(packet, offset, r - white, g - white, b - white, order)
+        packet[idx] = white.toByte()
         return idx + 1
     }
 

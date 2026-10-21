@@ -36,6 +36,17 @@ For exact versions, see:
 - `app/build.gradle.kts`
 - `gradle/libs.versions.toml`
 
+## Adapted Source Components
+
+- **HyperHDR InfiniteColorEngineRgbw and smoothing algorithms** — MIT
+  - Copyright (c) 2020-2026 awawa-dev
+  - Upstream: https://github.com/awawa-dev/HyperHDR
+  - Source: `sources/led-drivers/InfiniteColorEngineRgbw.cpp`
+  - Kotlin adaptation: `app/src/main/java/com/vasmarfas/UniversalAmbientLight/common/network/InfiniteColorEngineRgbw.kt`
+  - Smoothing references: `sources/infinite-color-engine/InfiniteSmoothing.cpp` and its RGB, YUV, exponential and hybrid interpolators
+  - Smoothing adaptation: `app/src/main/java/com/vasmarfas/UniversalAmbientLight/common/network/LedColorInterpolator.kt`
+  - The MIT permission and warranty notice below applies to these adaptations.
+
 ## License Texts
 
 ### Apache License 2.0

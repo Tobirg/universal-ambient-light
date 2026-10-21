@@ -17,6 +17,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -198,6 +201,9 @@ internal fun ColumnScope.ConnectionSection(
                         AnalyticsHelper.logSettingChanged(context, "adalight_baudrate", newBaudrate)
                     }
                 )
+                var selectedProtocol by remember(prefs) {
+                    mutableStateOf(prefs.getString(R.string.pref_key_adalight_protocol, "ada") ?: "ada")
+                }
                 ListPreference(
                     prefs = prefs,
                     keyRes = R.string.pref_key_adalight_protocol,
@@ -205,10 +211,29 @@ internal fun ColumnScope.ConnectionSection(
                     entriesRes = R.array.pref_list_adalight_protocol,
                     entryValuesRes = R.array.pref_list_adalight_protocol_values,
                     onValueChange = { newProtocol ->
+                        selectedProtocol = newProtocol
                         AnalyticsHelper.logAdalightProtocolChanged(context, newProtocol)
                         AnalyticsHelper.logSettingChanged(context, "adalight_protocol", newProtocol)
                     }
                 )
+                var hyperSerialMode by remember(prefs) {
+                    mutableStateOf(prefs.getString(R.string.pref_key_hyperserial_color_mode, "rgb") ?: "rgb")
+                }
+                if (selectedProtocol.equals("awa", ignoreCase = true) ||
+                    selectedProtocol.equals("awa-rgbw", ignoreCase = true)
+                ) {
+                    ListPreference(
+                        prefs = prefs,
+                        keyRes = R.string.pref_key_hyperserial_color_mode,
+                        title = stringResource(R.string.pref_title_hyperserial_color_mode),
+                        entriesRes = R.array.pref_list_hyperserial_color_mode,
+                        entryValuesRes = R.array.pref_list_hyperserial_color_mode_values,
+                        onValueChange = { hyperSerialMode = it },
+                    )
+                    if (hyperSerialMode == "ice" && selectedProtocol != "awa-rgbw") {
+                        RgbwCalibrationPreferences(prefs)
+                    }
+                }
             }
 
             OutputType.HUE -> {
@@ -302,20 +327,38 @@ private fun ColumnScope.WledSettings(prefs: Preferences, state: SettingsScreenSt
             AnalyticsHelper.logSettingChanged(context, "wled_color_order", newColorOrder)
         }
     )
-    CheckBoxPreference(
-        prefs = prefs,
-        keyRes = R.string.pref_key_wled_rgbw,
-        title = stringResource(R.string.pref_title_wled_rgbw),
-        summary = if (state.currentPort == "19446") {
-            stringResource(R.string.pref_summary_wled_rgbw_raw)
-        } else {
-            stringResource(R.string.pref_summary_wled_rgbw_white_mode)
-        },
-        onValueChange = { enabled ->
-            AnalyticsHelper.logRgbwChanged(context, enabled)
-            AnalyticsHelper.logSettingChanged(context, "wled_rgbw", enabled.toString())
+    if (state.wledProtocol != "udp_raw" || state.currentPort != "19446") {
+        var rgbwEnabled by remember(prefs) {
+            mutableStateOf(prefs.getBoolean(R.string.pref_key_wled_rgbw, false))
         }
-    )
+        CheckBoxPreference(
+            prefs = prefs,
+            keyRes = R.string.pref_key_wled_rgbw,
+            title = stringResource(R.string.pref_title_wled_rgbw),
+            summary = stringResource(R.string.pref_summary_wled_rgbw_white_mode),
+            onValueChange = { enabled ->
+                rgbwEnabled = enabled
+                AnalyticsHelper.logRgbwChanged(context, enabled)
+                AnalyticsHelper.logSettingChanged(context, "wled_rgbw", enabled.toString())
+            }
+        )
+        var rgbwMode by remember(prefs) {
+            mutableStateOf(prefs.getString(R.string.pref_key_wled_rgbw_color_mode, "rgbw") ?: "rgbw")
+        }
+        if (rgbwEnabled) {
+            ListPreference(
+                prefs = prefs,
+                keyRes = R.string.pref_key_wled_rgbw_color_mode,
+                title = stringResource(R.string.pref_title_rgbw_color_mode),
+                entriesRes = R.array.pref_list_rgbw_color_mode,
+                entryValuesRes = R.array.pref_list_rgbw_color_mode_values,
+                onValueChange = { rgbwMode = it },
+            )
+            if (rgbwMode == "ice") {
+                RgbwCalibrationPreferences(prefs)
+            }
+        }
+    }
     val brightnessMaxSummary = stringResource(R.string.pref_summary_wled_brightness_max)
     SliderPreference(
         prefs = prefs,

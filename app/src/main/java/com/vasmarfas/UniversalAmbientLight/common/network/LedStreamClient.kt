@@ -28,6 +28,8 @@ abstract class LedStreamClient(
         val settlingTime: Int,
         val outputDelayMs: Long,
         val updateFrequency: Int,
+        val algorithm: String = "linear",
+        val luminanceLimit: Int = 0,
     )
 
     private val mLayoutTest = LedLayoutTestController(mContext) { leds -> deliver(leds) }
@@ -69,6 +71,7 @@ abstract class LedStreamClient(
 
     init {
         // Пресет задаёт основу, значения из настроек её перекрывают, как у WLED и Adalight
+        mSmoothing.setAlgorithm(smoothing.algorithm, smoothing.luminanceLimit)
         mSmoothing.applyPreset(smoothing.preset)
         mSmoothing.setSettlingTime(smoothing.settlingTime)
         mSmoothing.setOutputDelay(smoothing.outputDelayMs)

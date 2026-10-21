@@ -22,6 +22,10 @@ class AdalightClient(
     settlingTime: Int = 200,
     outputDelayMs: Long = 80L,
     updateFrequency: Int = 25,
+    colorMode: String = "rgb",
+    rgbwCalibration: RgbwCalibration = RgbwCalibration(),
+    smoothingAlgorithm: String = "linear",
+    smoothingLuminanceLimit: Int = 0,
 ) : HyperionClient, StreamingClient, AddressableLedClient {
 
     enum class ProtocolType {
@@ -39,7 +43,7 @@ class AdalightClient(
     private val mBaudRate: Int = if (baudRate > 0) baudRate else 115200
     private val mProtocol = when (protocol.lowercase()) {
         "lbapa", "1" -> ProtocolType.LBAPA
-        "awa", "2" -> ProtocolType.AWA
+        "awa", "2", "awa-rgbw" -> ProtocolType.AWA
         "tpm2" -> ProtocolType.TPM2
         "skydimo" -> ProtocolType.SKYDIMO
         "sedu" -> ProtocolType.SEDU
@@ -48,6 +52,17 @@ class AdalightClient(
         "sp616e" -> ProtocolType.SP616E
         else -> ProtocolType.ADA
     }
+
+    private val mIceRgbw = InfiniteColorEngineRgbw(
+        rgbwCalibration.whiteThreshold, rgbwCalibration.whiteIntensity,
+        floatArrayOf(rgbwCalibration.whiteRed, rgbwCalibration.whiteGreen, rgbwCalibration.whiteBlue),
+    )
+    // Два буфера под mWriteLock: keepalive сохраняет последний успешно отправленный кадр.
+    private var mIceWriteBuffer = ByteArray(0)
+    private var mIceSentBuffer = ByteArray(0)
+    private val mColorMode = HyperSerialColorMode.fromPreference(
+        if (protocol.equals("awa-rgbw", ignoreCase = true)) "rgbw" else colorMode
+    )
 
     private var mPort: UsbSerialPort? = null
 
@@ -77,6 +92,9 @@ class AdalightClient(
     @Volatile
     private var mLastLeds: Array<ColorRgb>? = null
 
+    // Последний фактически отправленный AWA-кадр для keepalive и корректного гашения.
+    private var mLastAwaFrame: AdalightPacketEncoder.AwaFrame? = null
+
     @Volatile
     private var mLastSendMs = 0L
 
@@ -90,11 +108,20 @@ class AdalightClient(
     private var mLastAutoThrottlePacketSize: Int = -1
 
     init {
-        mSmoothing = ColorSmoothing { leds ->
-            synchronized(mLayoutTest) {
-                if (!mLayoutTest.enabled) sendLedData(leds)
+        mSmoothing = ColorSmoothing(object : ColorSmoothing.LedDataSender {
+            override fun sendLedData(colors: Array<ColorRgb>) {
+                synchronized(mLayoutTest) {
+                    if (!mLayoutTest.enabled) this@AdalightClient.sendLedData(colors)
+                }
             }
-        }
+
+            override fun sendPreciseLedData(colors: Array<ColorRgb>, precise: FloatArray) {
+                synchronized(mLayoutTest) {
+                    if (!mLayoutTest.enabled) this@AdalightClient.sendLedData(colors, precise)
+                }
+            }
+        })
+        mSmoothing.setAlgorithm(smoothingAlgorithm, smoothingLuminanceLimit)
         // Применить настройки сглаживания из preferences
         // Сначала применяем пресет как базовые значения
         mSmoothing.applyPreset(smoothingPreset)
@@ -141,8 +168,12 @@ class AdalightClient(
             )
         }
 
-        // Берём первое доступное устройство
-        val driver = availableDrivers[0]
+        // Предпочитаем устройство, для которого уже получено USB-разрешение.
+        // Первое в списке может отличаться от устройства из USB_DEVICE_ATTACHED.
+        // Если разрешений нет, сохраняем прежнее поведение и сообщение об ошибке.
+        val driver = UsbSerialDeviceSelector.select(availableDrivers) {
+            usbManager.hasPermission(it.device)
+        }
         val device = driver.device
 
         // Проверяем разрешение.
@@ -172,13 +203,17 @@ class AdalightClient(
             // подняты; на платах с авто-reset это ещё и перезагружает MCU, чтобы прошивка заново
             // отправила свой стартовый маркер "Ada" для хендшейка ниже. Best-effort: драйверы,
             // которые не поддерживают линию, кидают исключение — его игнорируем.
-            try {
-                port.setDTR(true)
-            } catch (_: Exception) {
-            }
-            try {
-                port.setRTS(true)
-            } catch (_: Exception) {
+            if (mProtocol == ProtocolType.AWA) {
+                initializeAwaPort(port, device.vendorId, device.productId)
+            } else {
+                try {
+                    port.setDTR(true)
+                } catch (_: Exception) {
+                }
+                try {
+                    port.setRTS(true)
+                } catch (_: Exception) {
+                }
             }
 
             // Хендшейк по «магическому слову» Adalight: стандартная прошивка при старте печатает
@@ -187,17 +222,40 @@ class AdalightClient(
             // именно из-за этого у нас были рассинхрон и мерцание на старте в отличие от аналога.
             // Если устройство не прислало "Ada" за таймаут — всё равно продолжаем (некоторые
             // прошивки маркер не шлют), поэтому совместимость не ухудшается.
-            waitForAdaHandshake()
+            if (mProtocol == ProtocolType.ADA || mProtocol == ProtocolType.LBAPA) {
+                waitForAdaHandshake()
+            } else if (mProtocol == ProtocolType.AWA) {
+                // HyperHDR определяет совместимые прошивки по стартовому сообщению.
+                // Отсутствие сообщения не запрещает подключение совместимой прошивки.
+                waitForAwaHandshake()
+            }
 
             mConnected = true
             mSmoothing.start()
             mKeepAlive.scheduleWithFixedDelay({
                 synchronized(mLayoutTest) {
                     mLayoutTest.refresh()
-                    val last = mLastLeds ?: return@scheduleWithFixedDelay
                     if (mPaused || !isConnected()) return@scheduleWithFixedDelay
                     if (System.currentTimeMillis() - mLastSendMs < KEEPALIVE_MS) return@scheduleWithFixedDelay
-                    sendLedData(Array(last.size) { last[it].clone() })
+                    if (mProtocol == ProtocolType.AWA) {
+                        synchronized(mWriteLock) write@{
+                            val frame = mLastAwaFrame ?: return@write
+                            val packet = AdalightPacketEncoder.createAwaPacket(frame)
+                            val port = mPort ?: return@write
+                            if (!mConnected || mPaused) return@write
+                            try {
+                                port.write(packet, 1000)
+                                mLastSendMs = System.currentTimeMillis()
+                            } catch (e: Exception) {
+                                // USB-драйвер может выбросить непроверяемое исключение при отключении устройства.
+                                Log.e(TAG, "HyperSerial keepalive failed", e)
+                                mConnected = false
+                            }
+                        }
+                    } else {
+                        val last = mLastLeds ?: return@scheduleWithFixedDelay
+                        sendLedData(Array(last.size) { last[it].clone() })
+                    }
                 }
             }, KEEPALIVE_MS, KEEPALIVE_MS / 2, TimeUnit.MILLISECONDS)
             Log.i(
@@ -226,6 +284,26 @@ class AdalightClient(
         }
     }
 
+    /** Запуск AWA необязателен: неподдерживаемые линии управления не должны отклонять USB-устройство. */
+    private fun initializeAwaPort(port: UsbSerialPort, vendorId: Int, productId: Int) {
+        HyperSerialPortStartup.initialize(
+            vendorId, productId,
+            setLines = { dtr, rts ->
+                try {
+                    port.setDTR(dtr)
+                } catch (e: Exception) {
+                    Log.d(TAG, "AWA DTR unavailable: ${e.message}")
+                }
+                try {
+                    port.setRTS(rts)
+                } catch (e: Exception) {
+                    Log.d(TAG, "AWA RTS unavailable: ${e.message}")
+                }
+            },
+            sleep = { delay -> Thread.sleep(delay) },
+        )
+    }
+
     /**
      * Ждём стартовый маркер "Ada", который стандартная прошивка Adalight печатает при загрузке.
      * Возвращаемся сразу, как только маркер получен, либо по истечении таймаута (best-effort —
@@ -252,6 +330,30 @@ class AdalightClient(
             Log.i(TAG, "No 'Ada' handshake within ${HANDSHAKE_TIMEOUT_MS}ms — proceeding anyway")
         } catch (e: Exception) {
             Log.w(TAG, "Handshake read failed (${e.message}) — proceeding anyway")
+        }
+    }
+
+    /** Проверка HyperSerial необязательна: неизвестные совместимые прошивки не отклоняем. */
+    private fun waitForAwaHandshake() {
+        val port = mPort ?: return
+        val buf = ByteArray(64)
+        val received = StringBuilder()
+        val deadline = System.currentTimeMillis() + AWA_HANDSHAKE_TIMEOUT_MS
+        try {
+            while (System.currentTimeMillis() < deadline) {
+                val n = port.read(buf, HANDSHAKE_READ_TIMEOUT_MS)
+                if (n > 0) {
+                    received.append(String(buf, 0, n, Charsets.US_ASCII))
+                    if (received.contains("Awa driver", ignoreCase = true)) {
+                        Log.i(TAG, "HyperSerial firmware identified")
+                        return
+                    }
+                    if (received.length > 128) received.delete(0, received.length - 64)
+                }
+            }
+            Log.i(TAG, "No HyperSerial banner detected; continuing with AWA")
+        } catch (e: Exception) {
+            Log.w(TAG, "HyperSerial identification unavailable (${e.message}); continuing")
         }
     }
 
@@ -286,17 +388,39 @@ class AdalightClient(
         // потоке гашения, блокирующая запись здесь допустима.
         mSmoothing.stop()
         mKeepAlive.shutdownNow()
-        if (mConnected) {
-            val ledCount = maxOf(LedDataExtractor.getLedCount(mContext), mLastLeds?.size ?: 0)
-            sendLedData(Array(ledCount) { ColorRgb(0, 0, 0) })
+        synchronized(mWriteLock) {
+            val port = mPort
+            if (mConnected && port != null) {
+                try {
+                    val lastFrame = if (mProtocol == ProtocolType.AWA) mLastAwaFrame else null
+                    val blackPacket = when (lastFrame) {
+                        is AdalightPacketEncoder.AwaFrame.Rgb ->
+                            AdalightPacketEncoder.createAwaPacket(
+                                Array(lastFrame.leds.size) { ColorRgb(0, 0, 0) },
+                                lastFrame.calibration
+                            )
+                        is AdalightPacketEncoder.AwaFrame.Rgbw ->
+                            AdalightPacketEncoder.createAwaRgbwPacket(ByteArray(lastFrame.channels.size))
+                        null -> {
+                            val ledCount = maxOf(LedDataExtractor.getLedCount(mContext), mLastLeds?.size ?: 0)
+                            if (ledCount > 0) createPacket(
+                                mProtocol, Array(ledCount) { ColorRgb(0, 0, 0) }
+                            ) else null
+                        }
+                    }
+                    if (blackPacket != null) port.write(blackPacket, 1000)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to send final black frame", e)
+                }
+            }
+            mConnected = false
+            try {
+                port?.close()
+            } catch (e: IOException) {
+                Log.e(TAG, "Error closing port", e)
+            }
+            mPort = null
         }
-        mConnected = false
-        try {
-            mPort?.close()
-        } catch (e: IOException) {
-            Log.e(TAG, "Error closing port", e)
-        }
-        mPort = null
     }
 
     @Throws(IOException::class)
@@ -305,6 +429,7 @@ class AdalightClient(
         // Отправляем все светодиоды чёрными
         val ledCount = LedDataExtractor.getLedCount(mContext)
         val blackLeds = Array(ledCount) { ColorRgb(0, 0, 0) }
+        // Гашение проходит через штатное сглаживание; формат RGBW сохраняет отправитель.
         mSmoothing.setTargetColors(blackLeds)
     }
 
@@ -359,8 +484,42 @@ class AdalightClient(
         mSmoothing.setTargetColors(mLedDataBuffer)
     }
 
+    internal fun sendAwaFrame(frame: AdalightPacketEncoder.AwaFrame) {
+        if (mProtocol != ProtocolType.AWA) {
+            throw IllegalStateException("HyperSerial frames require AWA protocol")
+        }
+        if (!isConnected() || mPaused) return
+        val packet = AdalightPacketEncoder.createAwaPacket(frame)
+        // Синхронизируем сброс очереди с записью: уже выполняющийся callback
+        // сглаживания не должен перезаписать RGBW-кадр после его отправки.
+        synchronized(mWriteLock) {
+            if (frame is AdalightPacketEncoder.AwaFrame.Rgbw) {
+                mSmoothing.stop()
+                if (!mPaused && mConnected) mSmoothing.start()
+            }
+            val port = mPort ?: return
+            if (!mConnected || mPaused) return
+            try {
+                port.write(packet, 1000)
+                mLastSendMs = System.currentTimeMillis()
+                mLastLeds = null
+                mLastAwaFrame = when (frame) {
+                    is AdalightPacketEncoder.AwaFrame.Rgb ->
+                        AdalightPacketEncoder.AwaFrame.Rgb(
+                            Array(frame.leds.size) { frame.leds[it].clone() }, frame.calibration
+                        )
+                    is AdalightPacketEncoder.AwaFrame.Rgbw ->
+                        AdalightPacketEncoder.AwaFrame.Rgbw(frame.channels.clone())
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send HyperSerial frame", e)
+                mConnected = false
+            }
+        }
+    }
+
     // Обратный вызов от ColorSmoothing
-    private fun sendLedData(leds: Array<ColorRgb>) {
+    private fun sendLedData(leds: Array<ColorRgb>, precise: FloatArray? = null) {
         if (!isConnected() || mPaused) return
 
         val port = mPort
@@ -371,12 +530,51 @@ class AdalightClient(
         }
 
         try {
-            val packet = createPacket(mProtocol, leds)
-            maybeAutoThrottle(packet.size, leds.size)
-            mLastLeds = leds
-            mLastSendMs = System.currentTimeMillis()
+            if (mProtocol != ProtocolType.AWA) {
+                // Оценка предполагает блокирующий вывод WS2812 и UART 8N1.
+                // HyperSerial может использовать буферизованный USB CDC и параллельный вывод LED.
+                maybeAutoThrottle(createPacket(mProtocol, leds).size, leds.size)
+            }
             synchronized(mWriteLock) {
+                if (!mConnected || mPort !== port) return
+                // После очистки сглаживание может дослать чёрный RGB-кадр:
+                // не переключаем устройство с RGBW на RGB при таком переходе.
+                val frame = if (mProtocol == ProtocolType.AWA) {
+                    if (mColorMode == HyperSerialColorMode.RGBW ||
+                        mColorMode == HyperSerialColorMode.ICE
+                    ) {
+                        val channels = if (mColorMode == HyperSerialColorMode.ICE) {
+                            if (mIceWriteBuffer.size != leds.size * 4) {
+                                mIceWriteBuffer = ByteArray(leds.size * 4)
+                            }
+                            mIceRgbw.convertInto(leds, mIceWriteBuffer, precise = precise)
+                            mIceWriteBuffer
+                        } else {
+                            HyperSerialRgbwColor.convert(leds)
+                        }
+                        AdalightPacketEncoder.AwaFrame.Rgbw(channels)
+                    } else {
+                        AdalightPacketEncoder.frameForSmoothedRgb(leds, mLastAwaFrame)
+                    }
+                } else {
+                    null
+                }
+                val packet = if (frame != null) {
+                    AdalightPacketEncoder.createAwaPacket(frame)
+                } else {
+                    createPacket(mProtocol, leds)
+                }
                 port.write(packet, 1000)
+                mLastLeds = Array(leds.size) { leds[it].clone() }
+                if (frame is AdalightPacketEncoder.AwaFrame.Rgbw &&
+                    mColorMode == HyperSerialColorMode.ICE
+                ) {
+                    val reusable = mIceSentBuffer
+                    mIceSentBuffer = mIceWriteBuffer
+                    mIceWriteBuffer = reusable
+                }
+                if (frame != null) mLastAwaFrame = frame
+                mLastSendMs = System.currentTimeMillis()
             }
 
             // Изредка пишем в лог для диагностики
@@ -427,9 +625,9 @@ class AdalightClient(
 
     private fun createPacket(protocol: ProtocolType, leds: Array<ColorRgb>): ByteArray {
         return when (protocol) {
-            ProtocolType.ADA -> createAdaPacket(leds)
+            ProtocolType.ADA -> AdalightPacketEncoder.createAdaPacket(leds)
             ProtocolType.LBAPA -> createLbapaPacket(leds)
-            ProtocolType.AWA -> createAwaPacket(leds)
+            ProtocolType.AWA -> AdalightPacketEncoder.createAwaPacket(leds)
             ProtocolType.TPM2 -> createTpm2Packet(leds)
             ProtocolType.SKYDIMO -> createSkydimoPacket(leds)
             ProtocolType.SEDU -> createSeduPacket(leds)
@@ -437,32 +635,6 @@ class AdalightClient(
             ProtocolType.ATMO -> createAtmoPacket(leds)
             ProtocolType.SP616E -> createSp616ePacket(leds)
         }
-    }
-
-    private fun createAdaPacket(leds: Array<ColorRgb>): ByteArray {
-        val ledCount = leds.size
-        val dataSize = ledCount * 3
-        val packet = ByteArray(6 + dataSize)
-
-        // Заголовок
-        packet[0] = 'A'.code.toByte()
-        packet[1] = 'd'.code.toByte()
-        packet[2] = 'a'.code.toByte()
-
-        val ledCountMinusOne = ledCount - 1
-        packet[3] = ((ledCountMinusOne shr 8) and 0xFF).toByte()
-        packet[4] = (ledCountMinusOne and 0xFF).toByte()
-        packet[5] = (packet[3].toInt() xor packet[4].toInt() xor 0x55).toByte()
-
-        // Данные RGB
-        var offset = 6
-        for (led in leds) {
-            packet[offset++] = led.red.toByte()
-            packet[offset++] = led.green.toByte()
-            packet[offset++] = led.blue.toByte()
-        }
-
-        return packet
     }
 
     private fun createLbapaPacket(leds: Array<ColorRgb>): ByteArray {
@@ -502,54 +674,6 @@ class AdalightClient(
         for (i in 0 until endFrameSize) {
             packet[offset++] = 0x00
         }
-
-        return packet
-    }
-
-    private fun createAwaPacket(leds: Array<ColorRgb>): ByteArray {
-        val ledCount = leds.size
-        val dataSize = ledCount * 3
-        // Размер контрольной суммы — 3 байта (Флетчер)
-        val packet = ByteArray(6 + dataSize + 3)
-
-        packet[0] = 'A'.code.toByte()
-        packet[1] = 'w'.code.toByte()
-        packet[2] = 'a'.code.toByte() // 'a' = no white calibration
-
-        val ledCountMinusOne = ledCount - 1
-        packet[3] = ((ledCountMinusOne shr 8) and 0xFF).toByte()
-        packet[4] = (ledCountMinusOne and 0xFF).toByte()
-        packet[5] = (packet[3].toInt() xor packet[4].toInt() xor 0x55).toByte()
-
-        var offset = 6
-        for (led in leds) {
-            packet[offset++] = led.red.toByte()
-            packet[offset++] = led.green.toByte()
-            packet[offset++] = led.blue.toByte()
-        }
-
-        // Контрольная сумма Флетчера
-        var fletcher1 = 0
-        var fletcher2 = 0
-        var fletcherExt = 0
-        // В реализации Hyperion позиция считается с нуля
-        var position = 0
-
-        for (i in 0 until dataSize) {
-            val `val` = packet[6 + i].toInt() and 0xFF
-
-            fletcherExt = (fletcherExt + (`val` xor position)) % 255
-            fletcher1 = (fletcher1 + `val`) % 255
-            fletcher2 = (fletcher2 + fletcher1) % 255
-
-            position = (position + 1) % 256
-        }
-
-        packet[offset++] = fletcher1.toByte()
-        packet[offset++] = fletcher2.toByte()
-
-        // Особый случай 0x41 ('A') обрабатываем отдельно, чтобы не спутать с заголовком
-        packet[offset] = if (fletcherExt == 0x41) 0xaa.toByte() else fletcherExt.toByte()
 
         return packet
     }
@@ -665,6 +789,7 @@ class AdalightClient(
 
         // Бюджет ожидания хендшейка. Покрывает окно перезагрузки MCU (~1.5–2 c) после подъёма DTR.
         private const val HANDSHAKE_TIMEOUT_MS = 2500L
+        private const val AWA_HANDSHAKE_TIMEOUT_MS = 1000L
         private const val HANDSHAKE_READ_TIMEOUT_MS = 250
 
         private const val KEEPALIVE_MS = 1000L

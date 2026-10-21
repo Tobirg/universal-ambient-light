@@ -25,6 +25,7 @@ import androidx.core.app.ServiceCompat
 import com.vasmarfas.UniversalAmbientLight.R
 import com.vasmarfas.UniversalAmbientLight.common.effect.EffectConfig
 import com.vasmarfas.UniversalAmbientLight.common.network.ConnectionConfig
+import com.vasmarfas.UniversalAmbientLight.common.network.RgbwCalibration
 import com.vasmarfas.UniversalAmbientLight.common.network.HomeAssistantClient
 import com.vasmarfas.UniversalAmbientLight.common.network.HomeAssistantLamp
 import com.vasmarfas.UniversalAmbientLight.common.network.HyperionThread
@@ -421,7 +422,21 @@ class ScreenGrabberService : Service() {
         val wledRgbw = prefs.getBoolean(R.string.pref_key_wled_rgbw, false)
         val wledBrightness = prefs.getInt(R.string.pref_key_wled_brightness, 255)
 
+        val wledRgbwColorMode = prefs.getString(R.string.pref_key_wled_rgbw_color_mode, "rgbw") ?: "rgbw"
         val adalightProtocol = prefs.getString(R.string.pref_key_adalight_protocol, "ada") ?: "ada"
+        val hyperSerialColorMode = prefs.getString(R.string.pref_key_hyperserial_color_mode, "rgb") ?: "rgb"
+
+        val smoothingAlgorithm = prefs.getString(
+            R.string.pref_key_smoothing_algorithm, getString(R.string.pref_default_smoothing_algorithm)
+        ) ?: getString(R.string.pref_default_smoothing_algorithm)
+        val smoothingLuminanceLimit = prefs.getInt(R.string.pref_key_smoothing_luminance_limit).coerceIn(0, 1000)
+        val rgbwCalibration = RgbwCalibration(
+            whiteThreshold = prefs.getInt(R.string.pref_key_rgbw_white_threshold).coerceIn(0, 100) / 100f,
+            whiteIntensity = prefs.getInt(R.string.pref_key_rgbw_white_intensity).coerceIn(0, 200) / 100f,
+            whiteRed = prefs.getInt(R.string.pref_key_rgbw_white_red).coerceIn(1, 200) / 100f,
+            whiteGreen = prefs.getInt(R.string.pref_key_rgbw_white_green).coerceIn(1, 200) / 100f,
+            whiteBlue = prefs.getInt(R.string.pref_key_rgbw_white_blue).coerceIn(1, 200) / 100f,
+        )
 
         val smoothingEnabled = prefs.getBoolean(R.string.pref_key_smoothing_enabled, false)
         val smoothingPreset = prefs.getString(R.string.pref_key_smoothing_preset, "off") ?: "off"
@@ -504,8 +519,13 @@ class ScreenGrabberService : Service() {
             wledColorOrder = wledColorOrder ?: "rgb",
             wledProtocol = wledProtocol,
             wledRgbw = wledRgbw,
+            wledRgbwColorMode = wledRgbwColorMode,
             wledBrightness = wledBrightness,
             adalightProtocol = adalightProtocol,
+            hyperSerialColorMode = hyperSerialColorMode,
+            smoothingAlgorithm = smoothingAlgorithm,
+            smoothingLuminanceLimit = smoothingLuminanceLimit,
+            rgbwCalibration = rgbwCalibration,
             smoothingEnabled = smoothingEnabled,
             smoothingPreset = smoothingPreset,
             settlingTime = settlingTime,
@@ -1900,9 +1920,18 @@ class ScreenGrabberService : Service() {
             R.string.pref_key_reconnect_delay,
             R.string.pref_key_adalight_baudrate,
             R.string.pref_key_adalight_protocol,
+            R.string.pref_key_hyperserial_color_mode,
+            R.string.pref_key_smoothing_algorithm,
+            R.string.pref_key_smoothing_luminance_limit,
+            R.string.pref_key_rgbw_white_threshold,
+            R.string.pref_key_rgbw_white_intensity,
+            R.string.pref_key_rgbw_white_red,
+            R.string.pref_key_rgbw_white_green,
+            R.string.pref_key_rgbw_white_blue,
             R.string.pref_key_wled_color_order,
             R.string.pref_key_wled_protocol,
             R.string.pref_key_wled_rgbw,
+            R.string.pref_key_wled_rgbw_color_mode,
             R.string.pref_key_wled_brightness,
             R.string.pref_key_smoothing_enabled,
             R.string.pref_key_smoothing_preset,

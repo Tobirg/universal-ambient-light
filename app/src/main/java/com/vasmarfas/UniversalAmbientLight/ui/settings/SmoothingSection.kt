@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.platform.LocalContext
@@ -41,6 +45,31 @@ internal fun ColumnScope.SmoothingSection(
                     )
                     AnalyticsHelper.updateSmoothingProperty(context, enabled)
                 }
+            )
+        }
+        val defaultAlgorithm = stringResource(R.string.pref_default_smoothing_algorithm)
+        var algorithm by remember(prefs, defaultAlgorithm) {
+            mutableStateOf(prefs.getString(R.string.pref_key_smoothing_algorithm, defaultAlgorithm) ?: defaultAlgorithm)
+        }
+        ListPreference(
+            prefs = prefs,
+            keyRes = R.string.pref_key_smoothing_algorithm,
+            title = stringResource(R.string.pref_title_smoothing_algorithm),
+            entriesRes = R.array.pref_list_smoothing_algorithm,
+            entryValuesRes = R.array.pref_list_smoothing_algorithm_values,
+            onValueChange = { algorithm = it },
+        )
+        if (algorithm == "yuv" || algorithm == "hybrid") {
+            val resources = LocalResources.current
+            SliderPreference(
+                prefs = prefs,
+                keyRes = R.string.pref_key_smoothing_luminance_limit,
+                title = stringResource(R.string.pref_title_smoothing_luminance_limit),
+                range = 0..1000,
+                summaryProvider = { value ->
+                    if (value == 0) resources.getString(R.string.smoothing_luminance_unlimited)
+                    else resources.getString(R.string.unit_percent_per_second, value)
+                },
             )
         }
         ListPreference(

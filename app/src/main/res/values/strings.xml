@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
   <string-array name="pref_list_framerate">
     <item>10 fps</item>
     <item>15 fps</item>
@@ -478,6 +478,22 @@
     <item>sp616e</item>
   </string-array>
 
+    <!-- Для локалей без перевода используется английский fallback; русский перевод есть в values-ru. -->
+  <string name="pref_title_rgbw_color_mode" tools:ignore="MissingTranslation">RGBW Color Processing</string>
+  <string-array name="pref_list_rgbw_color_mode"><item>RGBW (standard)</item><item>ICE (HyperHDR)</item></string-array>
+  <string-array name="pref_list_rgbw_color_mode_values"><item>rgbw</item><item>ice</item></string-array>
+  <string name="pref_title_hyperserial_color_mode" tools:ignore="MissingTranslation">HyperSerial Color Mode</string>
+  <string-array name="pref_list_hyperserial_color_mode">
+    <item>RGB</item>
+    <item>RGBW</item>
+    <item>ICE (HyperHDR)</item>
+  </string-array>
+  <string-array name="pref_list_hyperserial_color_mode_values">
+    <item>rgb</item>
+    <item>rgbw</item>
+    <item>ice</item>
+  </string-array>
+
   <!-- App Specific Strings -->
   <string name="toggle_activity_label">Universal Ambient Light (Toggle)</string>
   <string name="quick_tile_label">Universal Ambient Light</string>
@@ -869,5 +885,28 @@
     <string name="remote_layout_test_timeout">Timed out waiting for USB permission on the TV</string>
     <string name="remote_layout_test_denied">USB permission or LED test start denied on the TV</string>
     <string name="led_layout_direct_test">Show LED layout test</string>
+    <string name="pref_title_smoothing_algorithm" tools:ignore="MissingTranslation">Smoothing algorithm</string>
+    <string name="pref_title_smoothing_luminance_limit" tools:ignore="MissingTranslation">Maximum brightness change</string>
+    <string name="pref_title_rgbw_white_threshold" tools:ignore="MissingTranslation">White extraction threshold</string>
+    <string name="pref_title_rgbw_white_intensity" tools:ignore="MissingTranslation">White LED intensity</string>
+    <string name="pref_title_rgbw_white_red" tools:ignore="MissingTranslation">White point: red</string>
+    <string name="pref_title_rgbw_white_green" tools:ignore="MissingTranslation">White point: green</string>
+    <string name="pref_title_rgbw_white_blue" tools:ignore="MissingTranslation">White point: blue</string>
+    <string name="pref_group_rgbw_calibration" tools:ignore="MissingTranslation">ICE white channel</string>
+    <string name="smoothing_luminance_unlimited" tools:ignore="MissingTranslation">Unlimited</string>
+    <string name="unit_percent_per_second" tools:ignore="MissingTranslation">%1$d %% per second</string>
+    <string-array name="pref_list_smoothing_algorithm">
+        <item>Linear RGB</item>
+        <item>Exponential RGB</item>
+        <item>YUV</item>
+        <item>Hybrid inertia (YUV)</item>
+    </string-array>
+    <string-array name="pref_list_smoothing_algorithm_values" translatable="false">
+        <item>linear</item>
+        <item>exponential</item>
+        <item>yuv</item>
+        <item>hybrid</item>
+    </string-array>
+    <string name="unit_percent" tools:ignore="MissingTranslation">%1$d%%</string>
     <string name="error_mstar_capture_stopped">MStar hardware capture stopped: %1$s</string>
 </resources>

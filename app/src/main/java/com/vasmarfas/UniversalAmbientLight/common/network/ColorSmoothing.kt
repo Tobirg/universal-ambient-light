@@ -20,7 +20,6 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
         private const val DEFAULT_UPDATE_FREQUENCY_HZ = 60
         private const val DEFAULT_SETTLING_TIME_MS = 50
         private const val DEFAULT_OUTPUT_DELAY_MS = 0L
-        private const val MIN_UPDATE_INTERVAL_MS = 1L
 
         // Пауза между повторами сошедшегося кадра. Совсем замолчать нельзя: часть прошивок
         // по таймауту тишины уходит в собственный эффект, у WLED это staytime ~10 секунд.
@@ -28,18 +27,22 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
     }
 
     // Конфигурация
+    @Volatile
     private var mUpdateFrequencyHz = DEFAULT_UPDATE_FREQUENCY_HZ
+    @Volatile
     private var mSettlingTimeMs = DEFAULT_SETTLING_TIME_MS
 
     // Меняется на ходу из потока настроек, читается циклом отправки
     @Volatile
     private var mOutputDelayMs: Long = DEFAULT_OUTPUT_DELAY_MS
+    @Volatile
     private var mEnabled = true
 
     // Состояние
-    private var mPreviousValues: Array<ColorRgb>? = null
-    private var mTargetValues: Array<ColorRgb>? = null
-    private var mTargetTime: Long = 0
+    private var mInterpolator = LedColorInterpolator()
+    private var mHasTarget = false
+    @Volatile
+    private var mNextTickNs = 0L
 
     // Кадр после схождения интерполяции уже отправлен: дальше цикл шлёт только редкие
     // повторы. Гнать одинаковые кадры на полной частоте нельзя — сплошной поток без пауз
@@ -51,7 +54,8 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
     private var mLastSendMs = 0L
 
     // Очередь вывода (Output Delay) - хранит пары (время добавления, кадр)
-    private data class TimedFrame(val timestamp: Long, val colors: Array<ColorRgb>)
+    private data class TimedFrame(val timestamp: Long, val frame: OutputFrame)
+    private data class OutputFrame(val colors: Array<ColorRgb>, val precise: FloatArray, val generation: Int)
 
     private val mOutputQueue = ArrayDeque<TimedFrame>()
 
@@ -68,12 +72,24 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
     @Volatile
     private var mGeneration = 0
 
-    // Отслеживание времени последнего обновления (дебаунсинг)
-    private var mLastUpdateTime: Long = 0
-
-    // Интерфейс для отправки данных
     fun interface LedDataSender {
         fun sendLedData(colors: Array<ColorRgb>)
+
+        /** Дробные RGB-каналы в диапазоне 0–255; получатель не должен изменять массивы. */
+        fun sendPreciseLedData(colors: Array<ColorRgb>, precise: FloatArray) {
+            sendLedData(colors)
+        }
+    }
+
+    private fun nowMs(): Long = System.nanoTime() / 1_000_000L
+
+    /** Меняет алгоритм с очисткой кадров, подготовленных старым алгоритмом. */
+    @Synchronized
+    fun setAlgorithm(algorithm: String, luminanceLimit: Int = 0) {
+        mInterpolator = LedColorInterpolator(algorithm, luminanceLimit.coerceIn(0, 1000) * 2.55f)
+        mHasTarget = false
+        mIdleFrameSent = false
+        synchronized(mOutputQueue) { mOutputQueue.clear() }
     }
 
     private val mUpdateRunnable = object : Runnable {
@@ -84,127 +100,67 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
             updateLeds()
 
             if (mRunning && generation == mGeneration && mHandler != null) {
-                val intervalMs = 1000L / mUpdateFrequencyHz
-                mHandler?.postDelayed(this, intervalMs)
+                val intervalNs = 1_000_000_000L / mUpdateFrequencyHz
+                val now = System.nanoTime()
+                // Дробная часть периода не теряется: 60 Гц не превращаются в 62,5 Гц.
+                mNextTickNs += intervalNs
+                if (mNextTickNs <= now) mNextTickNs = now + intervalNs
+                mHandler?.postDelayed(this, (mNextTickNs - now + 999_999L) / 1_000_000L)
             }
         }
     }
 
     fun setTargetColors(targetColors: Array<ColorRgb>?) {
-        if (targetColors == null || targetColors.isEmpty()) {
-            return
-        }
-
-        // Дебаунсинг
-        val now = System.currentTimeMillis()
-        if (now - mLastUpdateTime < MIN_UPDATE_INTERVAL_MS) {
-            return
-        }
-        mLastUpdateTime = now
-
+        if (targetColors.isNullOrEmpty()) return
+        val direct: OutputFrame?
         synchronized(this) {
-            mTargetTime = now + if (mEnabled) mSettlingTimeMs else 0
-            mIdleFrameSent = false
-
-            // Инициализация при первом вызове или изменении размера
-            val current = mTargetValues
-            if (current == null || current.size != targetColors.size) {
-                val targets = Array(targetColors.size) { ColorRgb(0, 0, 0) }
-                val previous = Array(targetColors.size) { ColorRgb(0, 0, 0) }
-                mTargetValues = targets
-                mPreviousValues = previous
-
-                // Копируем начальное состояние
-                for (i in targetColors.indices) {
-                    targets[i].set(targetColors[i])
-                    previous[i].set(targetColors[i])
-                }
-
-                if (needsTimer()) {
-                    start()
-                }
+            val changed = mInterpolator.setTarget(targetColors, nowMs(), if (mEnabled) mSettlingTimeMs else 0)
+            mHasTarget = true
+            if (changed) mIdleFrameSent = false
+            if (needsTimer()) {
+                start()
+                direct = null
             } else {
-                // Обновление без мусора: копируем значения на месте
-                for (i in targetColors.indices) {
-                    current[i].set(targetColors[i])
-                }
+                direct = snapshot(nowMs())
             }
         }
+        if (direct != null) sendToDevice(direct)
+    }
 
-        // Ни сглаживания, ни задержки - отправляем данные напрямую (клонируем для безопасности)
-        if (!needsTimer()) {
-            val colorsCopy = Array(targetColors.size) { i -> targetColors[i].clone() }
-            sendToDevice(colorsCopy)
+    private fun snapshot(now: Long): OutputFrame {
+        val precise = mInterpolator.snapshot(now)
+        val colors = Array(precise.size / 3) { index ->
+            val offset = index * 3
+            ColorRgb(
+                precise[offset].roundToInt().coerceIn(0, 255),
+                precise[offset + 1].roundToInt().coerceIn(0, 255),
+                precise[offset + 2].roundToInt().coerceIn(0, 255),
+            )
         }
+        return OutputFrame(colors, precise, mGeneration)
     }
 
     private fun updateLeds() {
-        val colorsToSend: Array<ColorRgb>?
-
-        synchronized(this) {
-            colorsToSend = interpolateFrameLinear()
-        }
-
-        if (colorsToSend != null) {
-            queueColors(colorsToSend)
-        } else if (mOutputDelayMs != 0L) {
-            // Новый кадр в паузе между повторами не добавился, но хвост очереди задержки
-            // обязан дойти до ленты и без него
-            drainOutputQueue(System.currentTimeMillis())
-        }
-    }
-
-    private fun interpolateFrameLinear(): Array<ColorRgb>? {
-        val targets = mTargetValues ?: return null
-        val previous = mPreviousValues ?: return null
-        val now = System.currentTimeMillis()
-        val deltaTime = mTargetTime - now
-
-        if (deltaTime <= 0) {
-            // Время истекло, использовать целевые значения
-            // Обновляем mPreviousValues на месте
-            for (i in targets.indices) previous[i].set(targets[i])
-
-            // Цель достигнута — дальше только редкие повторы (см. mIdleFrameSent)
-            if (mIdleFrameSent && now - mLastSendMs < IDLE_RESEND_MS) return null
-            mIdleFrameSent = true
-
-            if (mOutputDelayMs == 0L) return previous
-
-            // Клонируем только если кадр уходит в очередь
-            return Array(previous.size) { i -> previous[i].clone() }
-        }
-
-        // Линейная интерполяция
-        var k = 1.0f - deltaTime.toFloat() / mSettlingTimeMs
-        k = max(0.0f, min(1.0f, k))
-
-        val length = min(previous.size, targets.size)
-        for (i in 0 until length) {
-            val rDiff = targets[i].red - previous[i].red
-            val gDiff = targets[i].green - previous[i].green
-            val bDiff = targets[i].blue - previous[i].blue
-
-            val r = max(0, min(255, previous[i].red + (k * rDiff).roundToInt()))
-            val g = max(0, min(255, previous[i].green + (k * gDiff).roundToInt()))
-            val b = max(0, min(255, previous[i].blue + (k * bDiff).roundToInt()))
-
-            previous[i].set(r, g, b)
-        }
-
-        if (mOutputDelayMs == 0L) return previous
-
-        return Array(previous.size) { i -> previous[i].clone() }
-    }
-
-    private fun queueColors(ledColors: Array<ColorRgb>) {
-        if (mOutputDelayMs == 0L) {
-            sendToDevice(ledColors)
-        } else {
-            val now = System.currentTimeMillis()
-            synchronized(mOutputQueue) {
-                mOutputQueue.addLast(TimedFrame(now, ledColors))
+        val now = nowMs()
+        val frame = synchronized(this) {
+            if (!mHasTarget || (mInterpolator.settled && mIdleFrameSent && now - mLastSendMs < IDLE_RESEND_MS)) {
+                null
+            } else {
+                snapshot(now).also { if (mInterpolator.settled) mIdleFrameSent = true }
             }
+        }
+        if (frame != null) {
+            queueColors(frame, now)
+        } else if (mOutputDelayMs != 0L) {
+            drainOutputQueue(now)
+        }
+    }
+
+    private fun queueColors(frame: OutputFrame, now: Long) {
+        if (mOutputDelayMs == 0L) {
+            sendToDevice(frame)
+        } else {
+            synchronized(mOutputQueue) { mOutputQueue.addLast(TimedFrame(now, frame)) }
             drainOutputQueue(now)
         }
     }
@@ -227,13 +183,14 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
             }
         }
         for (frame in ready) {
-            sendToDevice(frame.colors)
+            sendToDevice(frame.frame)
         }
     }
 
-    private fun sendToDevice(colors: Array<ColorRgb>) {
-        mLastSendMs = System.currentTimeMillis()
-        mDataSender?.sendLedData(colors)
+    private fun sendToDevice(frame: OutputFrame) {
+        if (frame.generation != mGeneration) return
+        mLastSendMs = nowMs()
+        mDataSender?.sendPreciseLedData(frame.colors, frame.precise)
     }
 
     // start/stop синхронизированы: start() зовут и поток отправки кадров, и поток
@@ -252,8 +209,9 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
         mHandler = handler
 
         mRunning = true
-        val intervalMs = 1000L / mUpdateFrequencyHz
-        handler.postDelayed(mUpdateRunnable, intervalMs)
+        val intervalNs = 1_000_000_000L / mUpdateFrequencyHz
+        mNextTickNs = System.nanoTime() + intervalNs
+        handler.postDelayed(mUpdateRunnable, (intervalNs + 999_999L) / 1_000_000L)
     }
 
     @Synchronized
@@ -267,15 +225,17 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
         synchronized(mOutputQueue) {
             mOutputQueue.clear()
         }
-        mPreviousValues = null
-        mTargetValues = null
+        mInterpolator.clear()
+        mHasTarget = false
         mIdleFrameSent = false
     }
 
+    @Synchronized
     fun setSettlingTime(ms: Int) {
         mSettlingTimeMs = max(0, min(1000, ms))
     }
 
+    @Synchronized
     fun setOutputDelay(ms: Long) {
         val neededBefore = needsTimer()
         mOutputDelayMs = max(0L, min(1000L, ms))
@@ -285,6 +245,7 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
         onTimerNeedChanged(neededBefore)
     }
 
+    @Synchronized
     fun setUpdateFrequency(hz: Int) {
         // Перепощивать runnable отсюда нельзя: auto-throttle Adalight зовёт этот метод из
         // самого цикла отправки, removeCallbacksAndMessages выполняющийся runnable не
@@ -293,6 +254,7 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
         mUpdateFrequencyHz = max(1, min(60, hz))
     }
 
+    @Synchronized
     fun setEnabled(enabled: Boolean) {
         val neededBefore = needsTimer()
         mEnabled = enabled
@@ -310,7 +272,7 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
         val needed = needsTimer()
         if (neededBefore && !needed && mRunning) {
             stop()
-        } else if (needed && !neededBefore && mTargetValues != null && !mRunning) {
+        } else if (needed && !neededBefore && mHasTarget && !mRunning) {
             start()
         }
     }
@@ -323,6 +285,7 @@ class ColorSmoothing(private val mDataSender: LedDataSender?) {
      * Применяет пресет сглаживания
      * @param preset «off», «responsive», «balanced» или «smooth»
      */
+    @Synchronized
     fun applyPreset(preset: String) {
         when (preset.lowercase()) {
             "off" -> {

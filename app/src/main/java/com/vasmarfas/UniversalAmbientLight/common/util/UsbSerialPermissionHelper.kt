@@ -14,6 +14,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.vasmarfas.UniversalAmbientLight.R
+import com.vasmarfas.UniversalAmbientLight.common.network.UsbSerialDeviceSelector
 
 /**
  * Запрашивает разрешение на первое (или конкретное) USB-последовательное устройство.
@@ -40,7 +41,8 @@ object UsbSerialPermissionHelper {
     fun findFirstSerialDevice(context: Context): UsbDevice? {
         val usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager ?: return null
         val drivers = UsbSerialProberFactory.getProber().findAllDrivers(usbManager)
-        return drivers.firstOrNull()?.device
+        if (drivers.isEmpty()) return null
+        return UsbSerialDeviceSelector.select(drivers) { usbManager.hasPermission(it.device) }.device
     }
 
     fun isSerialDevice(context: Context, device: UsbDevice): Boolean {
